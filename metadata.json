@@ -1,0 +1,6 @@
+{
+  "name": "Basketball-Mannschaftskasse",
+  "description": "Erfasse Getränke, Strafen und Kontostände für deine Basketball-Mannschaft mit integriertem Strafenkatalog und Abrechnung.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

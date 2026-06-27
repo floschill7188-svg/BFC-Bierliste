@@ -38,8 +38,21 @@ export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const [isCatalogOpen, setIsCatalogOpen] = useState(false);
+  const [isBookingAuthorized, setIsBookingAuthorized] = useState(false);
   const [bottomPinInput, setBottomPinInput] = useState('');
   const [bottomPinError, setBottomPinError] = useState('');
+  
+  // Pending Admin/Booking action state
+  const [pendingAdminAction, setPendingAdminAction] = useState<{
+    type: 'record_fine' | 'remove_fine' | 'bulk_fine' | 'add_player' | 'edit_player' | 'delete_player' | 'record_drink' | 'remove_drink' | 'record_payment' | 'revert_transaction' | 'bulk_drink' | 'open_catalog';
+    playerId?: string;
+    fineId?: string;
+    playerIds?: string[];
+    itemId?: string;
+  } | null>(null);
+  const [adminPromptPin, setAdminPromptPin] = useState('');
+  const [adminPromptError, setAdminPromptError] = useState('');
   
   // Navigation & Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -232,7 +245,7 @@ export default function App() {
   };
 
   // Quick record drink from PlayerCard
-  const handleRecordDrink = (playerId: string, drinkId: string) => {
+  const executeRecordDrink = (playerId: string, drinkId: string) => {
     const drink = drinks.find(d => d.id === drinkId);
     if (!drink) return;
 
@@ -271,8 +284,18 @@ export default function App() {
     }
   };
 
+  const handleRecordDrink = (playerId: string, drinkId: string) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeRecordDrink(playerId, drinkId);
+    } else {
+      setPendingAdminAction({ type: 'record_drink', playerId, itemId: drinkId });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
+  };
+
   // Remove drink booking (decrement counter + add offset tx or modify log)
-  const handleRemoveDrink = (playerId: string, drinkId: string) => {
+  const executeRemoveDrink = (playerId: string, drinkId: string) => {
     const drink = drinks.find(d => d.id === drinkId);
     if (!drink) return;
 
@@ -326,8 +349,18 @@ export default function App() {
     }
   };
 
-  // Quick record fine
-  const handleRecordFine = (playerId: string, fineId: string) => {
+  const handleRemoveDrink = (playerId: string, drinkId: string) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeRemoveDrink(playerId, drinkId);
+    } else {
+      setPendingAdminAction({ type: 'remove_drink', playerId, itemId: drinkId });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
+  };
+
+  // Execute actual fine recording
+  const executeRecordFine = (playerId: string, fineId: string) => {
     const fine = fines.find(f => f.id === fineId);
     if (!fine) return;
 
@@ -366,8 +399,19 @@ export default function App() {
     }
   };
 
-  // Decrement fine booking
-  const handleRemoveFine = (playerId: string, fineId: string) => {
+  // Quick record fine (handles authorization check)
+  const handleRecordFine = (playerId: string, fineId: string) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeRecordFine(playerId, fineId);
+    } else {
+      setPendingAdminAction({ type: 'record_fine', playerId, fineId });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
+  };
+
+  // Execute actual fine removal
+  const executeRemoveFine = (playerId: string, fineId: string) => {
     const fine = fines.find(f => f.id === fineId);
     if (!fine) return;
 
@@ -418,8 +462,19 @@ export default function App() {
     }
   };
 
-  // Add partial or full payment
-  const handleRecordPayment = (playerId: string, amount: number) => {
+  // Decrement fine booking (handles authorization check)
+  const handleRemoveFine = (playerId: string, fineId: string) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeRemoveFine(playerId, fineId);
+    } else {
+      setPendingAdminAction({ type: 'remove_fine', playerId, fineId });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
+  };
+
+  // Add partial or full payment (actual execution)
+  const executeRecordPayment = (playerId: string, amount: number) => {
     const updatedPlayers = players.map(player => {
       if (player.id === playerId) {
         return {
@@ -447,6 +502,16 @@ export default function App() {
     // Sync modal
     if (selectedPlayer && selectedPlayer.id === playerId) {
       setSelectedPlayer(updatedPlayers.find(p => p.id === playerId) || null);
+    }
+  };
+
+  const handleRecordPayment = (playerId: string, amount: number) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeRecordPayment(playerId, amount);
+    } else {
+      setPendingAdminAction({ type: 'record_payment', playerId, itemId: amount.toString() });
+      setAdminPromptPin('');
+      setAdminPromptError('');
     }
   };
 
@@ -484,8 +549,8 @@ export default function App() {
     setSelectedPlayer(null);
   };
 
-  // Bulk booking
-  const handleBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string) => {
+  // Execute actual bulk booking
+  const executeBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string) => {
     const item = type === 'drink' ? drinks.find(d => d.id === itemId) : fines.find(f => f.id === itemId);
     if (!item) return;
 
@@ -534,10 +599,86 @@ export default function App() {
     });
 
     saveState(updatedPlayers, drinks, fines, [...newTransactions, ...transactions]);
+
+    // Keep selected player synced if in bulk list
+    if (selectedPlayer && playerIds.includes(selectedPlayer.id)) {
+      setSelectedPlayer(updatedPlayers.find(p => p.id === selectedPlayer.id) || null);
+    }
   };
 
-  // Revert/Storno a single transaction by ID
-  const handleRevertTransaction = (txId: string) => {
+  // Bulk booking
+  const handleBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeBulkBook(playerIds, type, itemId);
+    } else {
+      setPendingAdminAction({ 
+        type: type === 'drink' ? 'bulk_drink' : 'bulk_fine', 
+        playerIds, 
+        itemId 
+      });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
+  };
+
+  const handleAdminPromptSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const pin = adminPromptPin;
+    const isPendingAdmin = pendingAdminAction && ['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type);
+    
+    let authorized = false;
+
+    if (pin === '2016') {
+      setIsAdminMode(true);
+      setIsBookingAuthorized(true);
+      authorized = true;
+    } else if (pin === 'Unter100') {
+      if (!isPendingAdmin) {
+        setIsBookingAuthorized(true);
+        authorized = true;
+      }
+    }
+
+    if (authorized) {
+      // Execute the pending action
+      if (pendingAdminAction) {
+        const { type, playerId, fineId, playerIds, itemId } = pendingAdminAction;
+        if (type === 'record_fine' && playerId && fineId) {
+          executeRecordFine(playerId, fineId);
+        } else if (type === 'remove_fine' && playerId && fineId) {
+          executeRemoveFine(playerId, fineId);
+        } else if (type === 'bulk_fine' && playerIds && itemId) {
+          executeBulkBook(playerIds, 'fine', itemId);
+        } else if (type === 'bulk_drink' && playerIds && itemId) {
+          executeBulkBook(playerIds, 'drink', itemId);
+        } else if (type === 'record_drink' && playerId && itemId) {
+          executeRecordDrink(playerId, itemId);
+        } else if (type === 'remove_drink' && playerId && itemId) {
+          executeRemoveDrink(playerId, itemId);
+        } else if (type === 'record_payment' && playerId && itemId) {
+          executeRecordPayment(playerId, parseFloat(itemId));
+        } else if (type === 'revert_transaction' && itemId) {
+          executeRevertTransaction(itemId);
+        } else if (type === 'add_player') {
+          setIsNewPlayerModalOpen(true);
+        } else if (type === 'delete_player' && playerId) {
+          handleDeletePlayer(playerId);
+          setSelectedPlayer(null);
+        } else if (type === 'open_catalog') {
+          setIsCatalogOpen(true);
+        }
+      }
+      
+      setPendingAdminAction(null);
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    } else {
+      setAdminPromptError(isPendingAdmin ? 'Falscher Admin-PIN!' : 'Falscher PIN oder Passwort!');
+    }
+  };
+
+  // Revert/Storno a single transaction by ID (actual execution)
+  const executeRevertTransaction = (txId: string) => {
     const tx = transactions.find(t => t.id === txId);
     if (!tx) return;
 
@@ -570,6 +711,16 @@ export default function App() {
 
     const updatedTx = transactions.filter(t => t.id !== txId);
     saveState(updatedPlayers, drinks, fines, updatedTx);
+  };
+
+  const handleRevertTransaction = (txId: string) => {
+    if (isAdminMode || isBookingAuthorized) {
+      executeRevertTransaction(txId);
+    } else {
+      setPendingAdminAction({ type: 'revert_transaction', itemId: txId });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
   };
 
   // Update overall drink list from settings
@@ -750,7 +901,23 @@ export default function App() {
               Backup / Export
             </button>
             <button
-              onClick={() => setIsNewPlayerModalOpen(true)}
+              onClick={() => setIsCatalogOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+              id="catalog-manager-toggle-btn"
+            >
+              <Settings className="w-4 h-4 text-[#FF6B00]" />
+              Tarife & Strafen
+            </button>
+            <button
+              onClick={() => {
+                if (isAdminMode) {
+                  setIsNewPlayerModalOpen(true);
+                } else {
+                  setPendingAdminAction({ type: 'add_player' });
+                  setAdminPromptPin('');
+                  setAdminPromptError('');
+                }
+              }}
               className="flex items-center gap-2 px-4 py-2.5 bg-[#FF6B00] hover:bg-orange-500 text-white hover:scale-[1.02] font-black rounded-xl text-xs transition transform active:scale-95 cursor-pointer shadow-xs"
               id="add-player-btn"
             >
@@ -1065,82 +1232,6 @@ export default function App() {
           </div>
         </section>
 
-        {/* 3. SETTINGS: KATALOG VERWALTEN (DRINKS & FINES) */}
-        <section id="catalog-settings">
-          {isAdminMode ? (
-            <div className="relative space-y-4 animate-fade-in">
-              <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-emerald-800">
-                <div className="flex items-center gap-2">
-                  <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span><strong>Admin-Modus aktiv:</strong> Du kannst nun Getränke-Preise ändern, neue Strafen hinzufügen und den Katalog verwalten.</span>
-                </div>
-                <button
-                  onClick={() => {
-                    setIsAdminMode(false);
-                    setBottomPinError('');
-                    setBottomPinInput('');
-                  }}
-                  className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs shrink-0"
-                >
-                  Admin-Sitzung sperren
-                </button>
-              </div>
-              <CatalogManager
-                drinks={drinks}
-                fines={fines}
-                onUpdateDrinks={handleUpdateDrinks}
-                onUpdateFines={handleUpdateFines}
-                onResetToDefaults={handleResetCatalogToDefaults}
-              />
-            </div>
-          ) : (
-            <div className="bg-slate-50 border border-slate-200 rounded-3xl p-8 text-center max-w-xl mx-auto space-y-4 shadow-3xs">
-              <div className="w-12 h-12 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
-                <Lock className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-800">🔒 Admin-Bereich: Katalog verwalten</h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Der Getränke- und Strafenkatalog ist aktuell für Mitglieder gesperrt. Gib den Admin-PIN ein, um Einstellungen vorzunehmen.
-                </p>
-              </div>
-              
-              <form 
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (bottomPinInput === '1234' || bottomPinInput.toLowerCase() === 'admin' || bottomPinInput === '1893') {
-                    setIsAdminMode(true);
-                    setBottomPinInput('');
-                    setBottomPinError('');
-                  } else {
-                    setBottomPinError('Falscher PIN! Tipp: Nutze "1234" oder "admin".');
-                  }
-                }}
-                className="space-y-3 max-w-sm mx-auto pt-2"
-              >
-                <div className="flex flex-col sm:flex-row gap-2 justify-center">
-                  <input
-                    type="password"
-                    placeholder="Admin-PIN eingeben"
-                    value={bottomPinInput}
-                    onChange={(e) => setBottomPinInput(e.target.value)}
-                    className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-[#FF6B00] shadow-2xs font-mono text-center flex-1"
-                  />
-                  <button
-                    type="submit"
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm shrink-0"
-                  >
-                    Freischalten
-                  </button>
-                </div>
-                {bottomPinError && (
-                  <p className="text-[10px] text-rose-600 font-semibold animate-fade-in">{bottomPinError}</p>
-                )}
-              </form>
-            </div>
-          )}
-        </section>
-
       </main>
 
       {/* FOOTER */}
@@ -1171,6 +1262,12 @@ export default function App() {
             onAddPayment={handleRecordPayment}
             onUpdatePlayer={handleUpdatePlayer}
             onDeletePlayer={handleDeletePlayer}
+            isAdminMode={isAdminMode}
+            onTriggerAdminPrompt={(actionType) => {
+              setPendingAdminAction({ type: actionType, playerId: selectedPlayer.id });
+              setAdminPromptPin('');
+              setAdminPromptError('');
+            }}
           />
         )}
       </AnimatePresence>
@@ -1287,6 +1384,163 @@ export default function App() {
         isAdminMode={isAdminMode}
         setIsAdminMode={setIsAdminMode}
       />
+
+      {/* Admin PIN Prompt for Fines/Bookings Booking */}
+      {pendingAdminAction && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-fade-in" id="admin-pin-prompt-modal">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-600" />
+                {['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type)
+                  ? 'Admin-Freigabe erforderlich'
+                  : 'Buchungs-Passwort erforderlich'}
+              </h3>
+              <button
+                onClick={() => setPendingAdminAction(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed">
+              {['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type)
+                ? 'Diese Aktion ist nur für Admins gestattet. Bitte gib den Admin-PIN ein.'
+                : 'Schreibende Buchungen sind passwortgeschützt. Bitte gib das Passwort ein.'}
+            </p>
+
+            <form onSubmit={handleAdminPromptSubmit} className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  placeholder={['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type)
+                    ? 'Admin-PIN'
+                    : 'Passwort'}
+                  value={adminPromptPin}
+                  onChange={(e) => setAdminPromptPin(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-center text-sm font-mono focus:outline-none focus:border-[#FF6B00] shadow-2xs"
+                  autoFocus
+                />
+                {adminPromptError && (
+                  <p className="text-[10px] text-rose-600 font-semibold text-center mt-1.5 animate-fade-in">{adminPromptError}</p>
+                )}
+              </div>
+
+              <div className="flex gap-2 justify-end pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPendingAdminAction(null)}
+                  className="px-4 py-2 border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold rounded-xl text-xs transition cursor-pointer"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-black rounded-xl text-xs transition cursor-pointer shadow-xs"
+                >
+                  Freischalten
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Catalog Manager (Tarife & Strafen) */}
+      {isCatalogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" id="catalog-modal">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3 shrink-0">
+              <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <Settings className="w-5 h-5 text-[#FF6B00]" />
+                Tarife & Strafen verwalten
+              </h3>
+              <button
+                onClick={() => setIsCatalogOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              {isAdminMode ? (
+                <div className="space-y-4">
+                  <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-emerald-800">
+                    <div className="flex items-center gap-2">
+                      <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span><strong>Admin-Modus aktiv:</strong> Du kannst nun Getränke-Preise ändern, neue Strafen hinzufügen und den Katalog verwalten.</span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsAdminMode(false);
+                        setBottomPinError('');
+                        setBottomPinInput('');
+                      }}
+                      className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs shrink-0"
+                    >
+                      Admin-Sitzung sperren
+                    </button>
+                  </div>
+                  <CatalogManager
+                    drinks={drinks}
+                    fines={fines}
+                    onUpdateDrinks={handleUpdateDrinks}
+                    onUpdateFines={handleUpdateFines}
+                    onResetToDefaults={handleResetCatalogToDefaults}
+                  />
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-3xl p-8 text-center max-w-xl mx-auto space-y-4 shadow-3xs my-8">
+                  <div className="w-12 h-12 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl flex items-center justify-center mx-auto">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">🔒 Admin-Bereich: Katalog verwalten</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Der Getränke- und Strafenkatalog ist aktuell für Mitglieder gesperrt. Gib den Admin-PIN ein, um Einstellungen vorzunehmen.
+                    </p>
+                  </div>
+                  
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (bottomPinInput === '2016') {
+                        setIsAdminMode(true);
+                        setBottomPinInput('');
+                        setBottomPinError('');
+                      } else {
+                        setBottomPinError('Falscher PIN!');
+                      }
+                    }}
+                    className="space-y-3 max-w-sm mx-auto pt-2"
+                  >
+                    <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                      <input
+                        type="password"
+                        placeholder="Admin-PIN eingeben"
+                        value={bottomPinInput}
+                        onChange={(e) => setBottomPinInput(e.target.value)}
+                        className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-[#FF6B00] shadow-2xs font-mono text-center flex-1"
+                      />
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm shrink-0"
+                      >
+                        Freischalten
+                      </button>
+                    </div>
+                    {bottomPinError && (
+                      <p className="text-[10px] text-rose-600 font-semibold animate-fade-in">{bottomPinError}</p>
+                    )}
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

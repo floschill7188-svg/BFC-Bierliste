@@ -15,6 +15,8 @@ interface PlayerDetailModalProps {
   onAddPayment: (playerId: string, amount: number) => void;
   onUpdatePlayer: (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => void;
   onDeletePlayer: (id: string) => void;
+  isAdminMode: boolean;
+  onTriggerAdminPrompt: (actionType: 'edit_player' | 'delete_player') => void;
 }
 
 export default function PlayerDetailModal({
@@ -30,6 +32,8 @@ export default function PlayerDetailModal({
   onAddPayment,
   onUpdatePlayer,
   onDeletePlayer,
+  isAdminMode,
+  onTriggerAdminPrompt,
 }: PlayerDetailModalProps) {
   if (!player) return null;
 
@@ -67,6 +71,10 @@ export default function PlayerDetailModal({
   const handleSavePlayerInfo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editName.trim()) return;
+    if (!isAdminMode) {
+      onTriggerAdminPrompt('edit_player');
+      return;
+    }
     onUpdatePlayer(player.id, editName.trim(), editNumber.trim() || undefined, editTeams);
     setIsEditing(false);
   };
@@ -155,7 +163,13 @@ export default function PlayerDetailModal({
                 <div className="flex items-center gap-2">
                   <h2 className="text-lg font-extrabold text-slate-900">{player.name}</h2>
                   <button
-                    onClick={() => setIsEditing(true)}
+                    onClick={() => {
+                      if (isAdminMode) {
+                        setIsEditing(true);
+                      } else {
+                        onTriggerAdminPrompt('edit_player');
+                      }
+                    }}
                     className="p-1 text-slate-400 hover:text-slate-700 rounded transition cursor-pointer"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
@@ -180,9 +194,11 @@ export default function PlayerDetailModal({
         {/* Balance Cards Bar */}
         <div className="grid grid-cols-3 gap-2 px-6 py-4 bg-slate-50/50 border-b border-slate-100">
           <div className="p-3 bg-white rounded-xl border border-slate-100 text-center shadow-2xs">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Ausstehend</span>
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+              {balance < 0 ? 'Guthaben' : 'Ausstehend'}
+            </span>
             <p className={`text-lg font-black mt-0.5 font-mono ${balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
-              {balance.toFixed(2)} €
+              {balance < 0 ? `${Math.abs(balance).toFixed(2)} €` : `${balance.toFixed(2)} €`}
             </p>
           </div>
           <div className="p-3 bg-white rounded-xl border border-slate-100 text-center shadow-2xs">
@@ -460,8 +476,12 @@ export default function PlayerDetailModal({
                       </button>
                       <button
                         onClick={() => {
-                          onDeletePlayer(player.id);
-                          onClose();
+                          if (isAdminMode) {
+                            onDeletePlayer(player.id);
+                            onClose();
+                          } else {
+                            onTriggerAdminPrompt('delete_player');
+                          }
                         }}
                         className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded text-xs transition cursor-pointer"
                       >
@@ -472,7 +492,13 @@ export default function PlayerDetailModal({
                 ) : (
                   <button
                     type="button"
-                    onClick={() => setShowDeleteConfirm(true)}
+                    onClick={() => {
+                      if (isAdminMode) {
+                        setShowDeleteConfirm(true);
+                      } else {
+                        onTriggerAdminPrompt('delete_player');
+                      }
+                    }}
                     className="flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-rose-600 border border-rose-200 hover:border-rose-600 text-rose-600 hover:text-white rounded-lg text-xs font-semibold transition cursor-pointer shadow-2xs"
                   >
                     <Trash2 className="w-3.5 h-3.5" />

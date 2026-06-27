@@ -64,14 +64,13 @@ export default function ExpenseModal({
 
   const handlePinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simple mock club PIN: "1234" or "admin" or "1893" (Freiburg base)
-    if (pinInput === '1234' || pinInput.toLowerCase() === 'admin' || pinInput === '1893') {
+    if (pinInput === '2016') {
       setIsAdminMode(true);
       setShowPinForm(false);
       setPinInput('');
       setPinError('');
     } else {
-      setPinError('Falscher PIN! Tipp: Nutze "1234" oder "admin" für die Demo.');
+      setPinError('Falscher PIN!');
     }
   };
 
@@ -193,10 +192,10 @@ export default function ExpenseModal({
             {showPinForm && (
               <form onSubmit={handlePinSubmit} className="mt-4 pt-3 border-t border-amber-200/50 flex gap-2 items-center animate-fade-in">
                 <div className="flex-1">
-                  <label className="block text-[9px] uppercase font-bold text-slate-500 mb-1">Club-PIN eingeben</label>
+                  <label className="block text-[9px] uppercase font-bold text-slate-500 mb-1">Admin-PIN eingeben</label>
                   <input
                     type="password"
-                    placeholder="Tippe '1234' oder 'admin'"
+                    placeholder="Admin-PIN"
                     value={pinInput}
                     onChange={(e) => setPinInput(e.target.value)}
                     className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"

@@ -88,7 +88,7 @@ export default function PlayerCard({
         </div>
 
         <div className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold ${balanceBadge}`}>
-          {balance === 0 ? 'Ausgeglichen' : `${balance > 0 ? '+' : ''}${balance.toFixed(2)} €`}
+          {balance === 0 ? 'Ausgeglichen' : balance < 0 ? `Guthaben: ${Math.abs(balance).toFixed(2)} €` : `+${balance.toFixed(2)} €`}
         </div>
       </div>
 

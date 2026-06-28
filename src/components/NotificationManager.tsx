@@ -182,6 +182,20 @@ export default function NotificationManager({
             <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
+                onClick={() => applyPreset('🥤 Getränke eintragen!', 'Erinnerung: Bitte tragt eure konsumierten Kaltgetränke im Kühlschrank ein, damit die Strichliste aktuell bleibt! Prost!')}
+                className="px-2.5 py-1 bg-white border border-slate-200 hover:border-[#FF6B00] hover:text-[#FF6B00] text-slate-600 rounded-lg text-[10px] font-medium transition cursor-pointer"
+              >
+                🥤 Getränke eintragen
+              </button>
+              <button
+                type="button"
+                onClick={() => applyPreset('📊 Kontostand überprüfen!', 'Erinnerung: Bitte kontrolliert euren aktuellen Kontostand in der App und gleicht offene Beträge zeitnah aus!')}
+                className="px-2.5 py-1 bg-white border border-slate-200 hover:border-[#FF6B00] hover:text-[#FF6B00] text-slate-600 rounded-lg text-[10px] font-medium transition cursor-pointer"
+              >
+                📊 Kontostand prüfen
+              </button>
+              <button
+                type="button"
                 onClick={() => applyPreset('🚨 Zahlungserinnerung', 'Bitte denkt daran, eure offenen Beträge in der Mannschaftskasse zu begleichen! Euer Kassenwart.')}
                 className="px-2.5 py-1 bg-white border border-slate-200 hover:border-[#FF6B00] hover:text-[#FF6B00] text-slate-600 rounded-lg text-[10px] font-medium transition cursor-pointer"
               >

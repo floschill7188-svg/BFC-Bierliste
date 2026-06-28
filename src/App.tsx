@@ -191,35 +191,6 @@ export default function App() {
               setLastProcessedNotificationIds((prev) => {
                 if (!prev.includes(notif.id)) {
                   setActiveNotificationToast(notif);
-                  
-                  // Trigger a real native OS Notification if permissions are granted
-                  if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                    try {
-                      if ('serviceWorker' in navigator) {
-                        navigator.serviceWorker.ready.then((reg) => {
-                          reg.showNotification(notif.title, {
-                            body: notif.message,
-                            icon: '/assets/icon.png',
-                            badge: '/assets/icon.png',
-                            tag: notif.id,
-                            vibrate: [200, 100, 200],
-                            data: {
-                              // @ts-ignore
-                              url: window.location.origin
-                            }
-                          } as any);
-                        });
-                      } else {
-                        new Notification(notif.title, {
-                          body: notif.message,
-                          icon: '/assets/icon.png',
-                          tag: notif.id
-                        });
-                      }
-                    } catch (nativeErr) {
-                      console.warn("Native Notification trigger failed:", nativeErr);
-                    }
-                  }
 
                   try {
                     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -373,57 +344,7 @@ export default function App() {
     }
   }, []);
 
-  // --- PUSH NOTIFICATION SCHEDULER CHECKER ---
-  useEffect(() => {
-    if (isFirebaseLoading) return;
 
-    const checkScheduledNotifications = async () => {
-      const now = new Date();
-      const unsentSchedules = notifications.filter(n => !n.sent && n.type === 'scheduled' && n.scheduledTime);
-
-      for (const notif of unsentSchedules) {
-        const schedTime = new Date(notif.scheduledTime!);
-        if (!isNaN(schedTime.getTime()) && now.getTime() >= schedTime.getTime()) {
-          console.log(`Triggering scheduled notification: ${notif.title}`);
-
-          // 1. Dispatch/Save historic copy as sent
-          const sentCopy: AppNotification = {
-            id: 'n_sent_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
-            title: notif.title,
-            message: notif.message,
-            type: 'manual',
-            targetTeam: notif.targetTeam,
-            createdAt: now.toISOString(),
-            sent: true,
-            sentAt: now.toISOString()
-          };
-
-          await dbSaveNotification(sentCopy);
-
-          // 2. Update original schedule
-          if (notif.weeklyInterval) {
-            const nextWeekTime = new Date(schedTime.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-            const updatedSchedule: AppNotification = {
-              ...notif,
-              scheduledTime: nextWeekTime, // Slide 1 week ahead
-            };
-            await dbSaveNotification(updatedSchedule);
-          } else {
-            const updatedSchedule: AppNotification = {
-              ...notif,
-              sent: true,
-              sentAt: now.toISOString()
-            };
-            await dbSaveNotification(updatedSchedule);
-          }
-        }
-      }
-    };
-
-    checkScheduledNotifications();
-    const interval = setInterval(checkScheduledNotifications, 15000);
-    return () => clearInterval(interval);
-  }, [notifications, isFirebaseLoading]);
 
   // Auto-dismiss active notification toast after 8 seconds
   useEffect(() => {

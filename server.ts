@@ -71,18 +71,21 @@ async function broadcastPushNotification(title: string, message: string) {
       url: '/'
     });
 
-    const promises = subSnap.docs.map(async (docSnap) => {
+    // De-duplicate by endpoint to prevent sending duplicate notifications to the same device/browser
+    const uniqueSubsMap = new Map<string, { id: string; data: any }>();
+    subSnap.docs.forEach((docSnap) => {
       const subData = docSnap.data();
-      // Skip fallback or incomplete subscriptions
-      if (!subData.endpoint || subData.endpoint === 'local_notification_api_granted' || !subData.endpoint.startsWith('http')) {
-        return;
+      if (subData.endpoint && subData.endpoint !== 'local_notification_api_granted' && subData.endpoint.startsWith('http')) {
+        uniqueSubsMap.set(subData.endpoint, { id: docSnap.id, data: subData });
       }
+    });
 
+    const promises = Array.from(uniqueSubsMap.values()).map(async ({ id, data }) => {
       const subscription = {
-        endpoint: subData.endpoint,
+        endpoint: data.endpoint,
         keys: {
-          auth: subData.keys?.auth || '',
-          p256dh: subData.keys?.p256dh || ''
+          auth: data.keys?.auth || '',
+          p256dh: data.keys?.p256dh || ''
         }
       };
 
@@ -90,14 +93,14 @@ async function broadcastPushNotification(title: string, message: string) {
         await webpush.sendNotification(subscription, payload);
         successCount++;
       } catch (err: any) {
-        console.warn(`[PUSH] Send failed for device ${docSnap.id}:`, err.message);
+        console.warn(`[PUSH] Send failed for device ${id}:`, err.message);
         // Automatically prune expired or removed push endpoints (status 410 Gone / 404 Not Found)
         if (err.statusCode === 410 || err.statusCode === 404) {
-          console.log(`[PUSH] Cleaning up expired subscription: ${docSnap.id}`);
+          console.log(`[PUSH] Cleaning up expired subscription: ${id}`);
           try {
-            await deleteDoc(doc(db, 'push_subscriptions', docSnap.id));
+            await deleteDoc(doc(db, 'push_subscriptions', id));
           } catch (delErr) {
-            console.error(`[PUSH] Cleanup failed for ${docSnap.id}:`, delErr);
+            console.error(`[PUSH] Cleanup failed for ${id}:`, delErr);
           }
         }
       }
@@ -221,10 +224,117 @@ function setupFirestoreListeners() {
   setInterval(runScheduledChecks, 15000);
 }
 
+// Cache processed transactions to ensure automated fine notifications only trigger once
+const processedTransactions = new Set<string>();
+
+// Real-time listener on transactions to automatically trigger push notifications for newly logged fines
+function setupTransactionListener() {
+  console.log("[FIRESTORE] Initializing real-time listener for automated fine transactions...");
+
+  let isInitialLoad = true;
+
+  onSnapshot(collection(db, 'transactions'), (snapshot) => {
+    if (isInitialLoad) {
+      snapshot.forEach((doc) => {
+        processedTransactions.add(doc.id);
+      });
+      isInitialLoad = false;
+      console.log(`[FIRESTORE] Initial batch of ${processedTransactions.size} transactions cached. Ignoring for real-time fine broadcast.`);
+      return;
+    }
+
+    snapshot.docChanges().forEach(async (change) => {
+      if (change.type === 'added') {
+        const tx = change.doc.data();
+        // Check if the transaction is a positive fine booking and has not been processed yet
+        if (tx.type === 'fine' && tx.amount > 0 && !processedTransactions.has(change.doc.id)) {
+          processedTransactions.add(change.doc.id);
+          console.log(`[FIRESTORE] Automated fine detected: "${tx.itemName}" for player "${tx.playerName}". Broadcasting Web Push...`);
+
+          const title = `💸 Strafe erfasst: ${tx.playerName}`;
+          const message = `${tx.playerName} hat eine Strafe erhalten: "${tx.itemName}" (${tx.amount.toFixed(2)} €).`;
+
+          const sent = await broadcastPushNotification(title, message);
+          console.log(`[FIRESTORE] Automated fine broadcasted successfully to ${sent} active subscriptions.`);
+        }
+      }
+    });
+  });
+}
+
+// Calculates next occurrence of a weekly day of the week and time for preloaded reminder notifications
+function getNextWeeklyOccurrenceForBootstrap(dayOfWeek: string, timeStr: string): string {
+  const germanDays = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+  const targetDayIdx = germanDays.indexOf(dayOfWeek);
+  if (targetDayIdx === -1) return new Date().toISOString();
+
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  const now = new Date();
+
+  let targetDate = new Date(now);
+  targetDate.setHours(hours, minutes, 0, 0);
+
+  let diff = targetDayIdx - now.getDay();
+  // If target day is in past, or today but time passed, schedule for next week
+  if (diff < 0 || (diff === 0 && now.getTime() >= targetDate.getTime())) {
+    diff += 7;
+  }
+  targetDate.setDate(now.getDate() + diff);
+  return targetDate.toISOString();
+}
+
+// Pre-populates default scheduled notifications if they do not exist
+async function bootstrapDefaultNotifications() {
+  console.log("[BOOTSTRAP] Checking default scheduled reminder notifications...");
+  try {
+    // 1. Drinks Reminder
+    const drinkDocRef = doc(db, 'notifications', 'n_remind_drinks');
+    const drinkDocSnap = await getDoc(drinkDocRef);
+    if (!drinkDocSnap.exists()) {
+      const nextTime = getNextWeeklyOccurrenceForBootstrap('Mittwoch', '21:00');
+      await setDoc(drinkDocRef, {
+        id: 'n_remind_drinks',
+        title: '🥤 Getränke eintragen!',
+        message: 'Erinnerung: Bitte tragt eure konsumierten Kaltgetränke im Kühlschrank ein, damit die Strichliste aktuell bleibt! Prost! 🍺',
+        type: 'scheduled',
+        scheduledTime: nextTime,
+        weeklyInterval: 'Mittwoch 21:00',
+        targetTeam: 'all',
+        createdAt: new Date().toISOString(),
+        sent: false
+      });
+      console.log("[BOOTSTRAP] Created default Drink Reminder scheduled notification.");
+    }
+
+    // 2. Account Balance Reminder
+    const balanceDocRef = doc(db, 'notifications', 'n_remind_balance');
+    const balanceDocSnap = await getDoc(balanceDocRef);
+    if (!balanceDocSnap.exists()) {
+      const nextTime = getNextWeeklyOccurrenceForBootstrap('Sonntag', '18:00');
+      await setDoc(balanceDocRef, {
+        id: 'n_remind_balance',
+        title: '📊 Kontostand überprüfen!',
+        message: 'Erinnerung: Bitte kontrolliert euren aktuellen Kontostand in der App und gleicht offene Beträge zeitnah aus! Danke!',
+        type: 'scheduled',
+        scheduledTime: nextTime,
+        weeklyInterval: 'Sonntag 18:00',
+        targetTeam: 'all',
+        createdAt: new Date().toISOString(),
+        sent: false
+      });
+      console.log("[BOOTSTRAP] Created default Account Balance Reminder scheduled notification.");
+    }
+  } catch (err) {
+    console.error("[BOOTSTRAP] Error creating default notifications:", err);
+  }
+}
+
 // Bootstrapper
 async function start() {
   await initializeVapid();
+  await bootstrapDefaultNotifications();
   setupFirestoreListeners();
+  setupTransactionListener();
 
   // Vite Server Middleware integration
   if (process.env.NODE_ENV !== "production") {

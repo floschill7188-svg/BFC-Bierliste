@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Player, Drink, Fine, Transaction, ClubStats, Expense, Notification } from './types';
+import { Player, Drink, Fine, Transaction, ClubStats, Expense, Notification as AppNotification } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
 import { onSnapshot, collection } from 'firebase/firestore';
@@ -25,6 +25,7 @@ import CatalogManager from './components/CatalogManager';
 import QuickBooking from './components/QuickBooking';
 import TransactionHistory from './components/TransactionHistory';
 import ExpenseModal from './components/ExpenseModal';
+import PushSettingsModal from './components/PushSettingsModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Dribbble, 
@@ -57,8 +58,8 @@ export default function App() {
   const [fines, setFines] = useState<Fine[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [activeNotificationToast, setActiveNotificationToast] = useState<Notification | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [activeNotificationToast, setActiveNotificationToast] = useState<AppNotification | null>(null);
   const [lastProcessedNotificationIds, setLastProcessedNotificationIds] = useState<string[]>(() => {
     try {
       const stored = localStorage.getItem('bb_seen_notifications');
@@ -68,6 +69,7 @@ export default function App() {
     }
   });
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [isPushSettingsOpen, setIsPushSettingsOpen] = useState(false);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [isBookingAuthorized, setIsBookingAuthorized] = useState(false);
@@ -163,15 +165,15 @@ export default function App() {
       });
 
       unsubNotifications = onSnapshot(collection(db, 'notifications'), (snapshot) => {
-        const notifList: Notification[] = [];
+        const notifList: AppNotification[] = [];
         snapshot.forEach((doc) => {
-          notifList.push(doc.data() as Notification);
+          notifList.push(doc.data() as AppNotification);
         });
         setNotifications(notifList);
 
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added' || change.type === 'modified') {
-            const notif = change.doc.data() as Notification;
+            const notif = change.doc.data() as AppNotification;
             if (notif.sent && notif.sentAt) {
               setLastProcessedNotificationIds((prev) => {
                 if (!prev.includes(notif.id)) {
@@ -180,6 +182,36 @@ export default function App() {
                   // Only trigger sound & toast if sent within last 20 seconds to prevent popups on initial load
                   if (nowTime - sentTime < 20000) {
                     setActiveNotificationToast(notif);
+                    
+                    // Trigger a real native OS Notification if permissions are granted
+                    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                      try {
+                        if ('serviceWorker' in navigator) {
+                          navigator.serviceWorker.ready.then((reg) => {
+                            reg.showNotification(notif.title, {
+                              body: notif.message,
+                              icon: '/assets/icon.png',
+                              badge: '/assets/icon.png',
+                              tag: notif.id,
+                              vibrate: [200, 100, 200],
+                              data: {
+                                // @ts-ignore
+                                url: window.location.origin
+                              }
+                            } as any);
+                          });
+                        } else {
+                          new Notification(notif.title, {
+                            body: notif.message,
+                            icon: '/assets/icon.png',
+                            tag: notif.id
+                          });
+                        }
+                      } catch (nativeErr) {
+                        console.warn("Native Notification trigger failed:", nativeErr);
+                      }
+                    }
+
                     try {
                       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
                       if (AudioContextClass) {
@@ -319,6 +351,19 @@ export default function App() {
     };
   }, []);
 
+  // --- SERVICE WORKER REGISTRATION ---
+  useEffect(() => {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => {
+          console.log('Service Worker registered successfully with scope:', reg.scope);
+        })
+        .catch((err) => {
+          console.warn('Service Worker registration failed:', err);
+        });
+    }
+  }, []);
+
   // --- PUSH NOTIFICATION SCHEDULER CHECKER ---
   useEffect(() => {
     if (isFirebaseLoading) return;
@@ -333,7 +378,7 @@ export default function App() {
           console.log(`Triggering scheduled notification: ${notif.title}`);
 
           // 1. Dispatch/Save historic copy as sent
-          const sentCopy: Notification = {
+          const sentCopy: AppNotification = {
             id: 'n_sent_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
             title: notif.title,
             message: notif.message,
@@ -349,13 +394,13 @@ export default function App() {
           // 2. Update original schedule
           if (notif.weeklyInterval) {
             const nextWeekTime = new Date(schedTime.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
-            const updatedSchedule: Notification = {
+            const updatedSchedule: AppNotification = {
               ...notif,
               scheduledTime: nextWeekTime, // Slide 1 week ahead
             };
             await dbSaveNotification(updatedSchedule);
           } else {
-            const updatedSchedule: Notification = {
+            const updatedSchedule: AppNotification = {
               ...notif,
               sent: true,
               sentAt: now.toISOString()
@@ -1065,7 +1110,7 @@ export default function App() {
     saveState(players, DEFAULT_DRINKS, DEFAULT_FINES, transactions);
   };
 
-  const handleAddNotification = async (notif: Notification) => {
+  const handleAddNotification = async (notif: AppNotification) => {
     await dbSaveNotification(notif);
   };
 
@@ -1251,6 +1296,18 @@ export default function App() {
             >
               <Settings className="w-4 h-4 text-[#FF6B00]" />
               Tarife & Strafen
+            </button>
+            <button
+              onClick={() => setIsPushSettingsOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs relative"
+              id="push-settings-toggle-btn"
+            >
+              <Bell className="w-4 h-4 text-[#FF6B00]" />
+              <span>Push-Mitteilungen</span>
+              <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#FF6B00]"></span>
+              </span>
             </button>
             {isBookingAuthorized || isAdminMode ? (
               <button
@@ -1956,6 +2013,11 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <PushSettingsModal
+        isOpen={isPushSettingsOpen}
+        onClose={() => setIsPushSettingsOpen(false)}
+      />
 
     </div>
   );

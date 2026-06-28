@@ -66,3 +66,15 @@ export interface Notification {
   weeklyInterval?: string; // e.g. "Mittwoch 22:30"
 }
 
+export interface PushSubscriptionData {
+  id: string;
+  endpoint: string;
+  keys: {
+    auth: string;
+    p256dh: string;
+  };
+  subscribedAt: string;
+  userAgent: string;
+}
+
+

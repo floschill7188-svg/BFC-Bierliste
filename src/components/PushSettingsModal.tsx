@@ -19,6 +19,22 @@ interface PushSettingsModalProps {
   onClose: () => void;
 }
 
+// Helper to convert standard Base64 VAPID public keys to Uint8Array for PushManager subscription
+function urlBase64ToUint8Array(base64String: string) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModalProps) {
   const [permission, setPermission] = useState<NotificationPermission>('default');
   const [isSubscribed, setIsSubscribed] = useState(false);
@@ -65,16 +81,24 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
           let subscriptionData: PushSubscriptionData;
           
           try {
-            // Attempt standard Web Push subscription
-            let sub = await reg.pushManager.getSubscription();
-            if (!sub) {
-              // Standard VAPID public key (represented as mock key for demo, or real if they provide it)
-              const mockVapidPublicKey = 'BEl62vPPTgES4gZ7EAdX3XfCq7S36U2y9U4M3-4U2N-z368zKk39X_z6Y';
-              sub = await reg.pushManager.subscribe({
-                userVisibleOnly: true,
-                applicationServerKey: mockVapidPublicKey
-              });
+            // Fetch the genuine, persistent VAPID public key from the backend
+            const vapidRes = await fetch('/api/vapid-public-key');
+            if (!vapidRes.ok) {
+              throw new Error(`Server returned status ${vapidRes.status} for VAPID lookup.`);
             }
+            const { publicKey } = await vapidRes.json();
+            
+            // Clean up any stale subscription first
+            let sub = await reg.pushManager.getSubscription();
+            if (sub) {
+              await sub.unsubscribe();
+            }
+            
+            const convertedVapidKey = urlBase64ToUint8Array(publicKey);
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: convertedVapidKey
+            });
             
             // Build the standard Web Push Subscription payload
             subscriptionData = {

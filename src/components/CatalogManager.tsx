@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Drink, Fine } from '../types';
-import { Plus, Trash, RotateCcw, AlertTriangle, Beer, Check, Info } from 'lucide-react';
+import { Drink, Fine, Notification } from '../types';
+import { Plus, Trash, RotateCcw, AlertTriangle, Beer, Check, Info, Bell } from 'lucide-react';
+import NotificationManager from './NotificationManager';
 
 interface CatalogManagerProps {
   drinks: Drink[];
@@ -8,6 +9,9 @@ interface CatalogManagerProps {
   onUpdateDrinks: (drinks: Drink[]) => void;
   onUpdateFines: (fines: Fine[]) => void;
   onResetToDefaults: () => void;
+  notifications: Notification[];
+  onAddNotification: (notif: Notification) => void;
+  onDeleteNotification: (id: string) => void;
 }
 
 export default function CatalogManager({
@@ -16,8 +20,11 @@ export default function CatalogManager({
   onUpdateDrinks,
   onUpdateFines,
   onResetToDefaults,
+  notifications,
+  onAddNotification,
+  onDeleteNotification,
 }: CatalogManagerProps) {
-  const [activeTab, setActiveTab] = useState<'drinks' | 'fines'>('drinks');
+  const [activeTab, setActiveTab] = useState<'drinks' | 'fines' | 'notifications'>('drinks');
 
   // Drink Form State
   const [newDrinkName, setNewDrinkName] = useState('');
@@ -190,6 +197,17 @@ export default function CatalogManager({
           id="tab-fines-btn"
         >
           📜 Strafenkatalog ({fines.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('notifications')}
+          className={`flex-1 py-2.5 text-sm font-semibold transition border-b-2 px-4 ${
+            activeTab === 'notifications'
+              ? 'border-[#FF6B00] text-[#FF6B00] bg-orange-50/50'
+              : 'border-transparent text-slate-500 hover:text-slate-800'
+          }`}
+          id="tab-notifications-btn"
+        >
+          📢 Push-Mitteilungen ({notifications.length})
         </button>
       </div>
 
@@ -397,6 +415,15 @@ export default function CatalogManager({
             )}
           </div>
         </div>
+      )}
+
+      {/* NOTIFICATIONS PUSH VIEW */}
+      {activeTab === 'notifications' && (
+        <NotificationManager
+          notifications={notifications}
+          onAddNotification={onAddNotification}
+          onDeleteNotification={onDeleteNotification}
+        />
       )}
     </div>
   );

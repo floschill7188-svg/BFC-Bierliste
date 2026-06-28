@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Player, Drink, Fine, Transaction, ClubStats, Expense } from './types';
+import { Player, Drink, Fine, Transaction, ClubStats, Expense, Notification } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
 import { onSnapshot, collection } from 'firebase/firestore';
@@ -16,7 +16,9 @@ import {
   dbSaveTransaction,
   dbDeleteTransaction,
   dbSaveExpense,
-  dbDeleteExpense
+  dbDeleteExpense,
+  dbSaveNotification,
+  dbDeleteNotification
 } from './lib/db';
 import PlayerDetailModal from './components/PlayerDetailModal';
 import CatalogManager from './components/CatalogManager';
@@ -42,7 +44,9 @@ import {
   X,
   Sparkles,
   Lock,
-  Unlock
+  Unlock,
+  Bell,
+  Volume2
 } from 'lucide-react';
 
 export default function App() {
@@ -53,6 +57,16 @@ export default function App() {
   const [fines, setFines] = useState<Fine[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [activeNotificationToast, setActiveNotificationToast] = useState<Notification | null>(null);
+  const [lastProcessedNotificationIds, setLastProcessedNotificationIds] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('bb_seen_notifications');
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
@@ -93,6 +107,7 @@ export default function App() {
     let unsubFines: () => void;
     let unsubTransactions: () => void;
     let unsubExpenses: () => void;
+    let unsubNotifications: () => void;
 
     const setupSubscriptions = () => {
       unsubPlayers = onSnapshot(collection(db, 'players'), (snapshot) => {
@@ -145,6 +160,60 @@ export default function App() {
         setExpenses(expensesList);
       }, (err) => {
         console.error("Failed to load expenses: ", err);
+      });
+
+      unsubNotifications = onSnapshot(collection(db, 'notifications'), (snapshot) => {
+        const notifList: Notification[] = [];
+        snapshot.forEach((doc) => {
+          notifList.push(doc.data() as Notification);
+        });
+        setNotifications(notifList);
+
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added' || change.type === 'modified') {
+            const notif = change.doc.data() as Notification;
+            if (notif.sent && notif.sentAt) {
+              setLastProcessedNotificationIds((prev) => {
+                if (!prev.includes(notif.id)) {
+                  const sentTime = new Date(notif.sentAt!).getTime();
+                  const nowTime = Date.now();
+                  // Only trigger sound & toast if sent within last 20 seconds to prevent popups on initial load
+                  if (nowTime - sentTime < 20000) {
+                    setActiveNotificationToast(notif);
+                    try {
+                      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                      if (AudioContextClass) {
+                        const audioCtx = new AudioContextClass();
+                        const playNote = (freq: number, delay: number, duration: number) => {
+                          const osc = audioCtx.createOscillator();
+                          const gain = audioCtx.createGain();
+                          osc.type = 'sine';
+                          osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
+                          gain.gain.setValueAtTime(0.1, audioCtx.currentTime + delay);
+                          gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + duration);
+                          osc.connect(gain);
+                          gain.connect(audioCtx.destination);
+                          osc.start(audioCtx.currentTime + delay);
+                          osc.stop(audioCtx.currentTime + delay + duration);
+                        };
+                        playNote(523.25, 0, 0.25); // C5
+                        playNote(659.25, 0.12, 0.35); // E5
+                      }
+                    } catch (soundErr) {
+                      console.warn("Audio chime failed to play:", soundErr);
+                    }
+                  }
+                  const updated = [...prev, notif.id];
+                  localStorage.setItem('bb_seen_notifications', JSON.stringify(updated));
+                  return updated;
+                }
+                return prev;
+              });
+            }
+          }
+        });
+      }, (err) => {
+        console.error("Failed to load notifications: ", err);
       });
     };
 
@@ -246,8 +315,71 @@ export default function App() {
       if (unsubFines) unsubFines();
       if (unsubTransactions) unsubTransactions();
       if (unsubExpenses) unsubExpenses();
+      if (unsubNotifications) unsubNotifications();
     };
   }, []);
+
+  // --- PUSH NOTIFICATION SCHEDULER CHECKER ---
+  useEffect(() => {
+    if (isFirebaseLoading) return;
+
+    const checkScheduledNotifications = async () => {
+      const now = new Date();
+      const unsentSchedules = notifications.filter(n => !n.sent && n.type === 'scheduled' && n.scheduledTime);
+
+      for (const notif of unsentSchedules) {
+        const schedTime = new Date(notif.scheduledTime!);
+        if (!isNaN(schedTime.getTime()) && now.getTime() >= schedTime.getTime()) {
+          console.log(`Triggering scheduled notification: ${notif.title}`);
+
+          // 1. Dispatch/Save historic copy as sent
+          const sentCopy: Notification = {
+            id: 'n_sent_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+            title: notif.title,
+            message: notif.message,
+            type: 'manual',
+            targetTeam: notif.targetTeam,
+            createdAt: now.toISOString(),
+            sent: true,
+            sentAt: now.toISOString()
+          };
+
+          await dbSaveNotification(sentCopy);
+
+          // 2. Update original schedule
+          if (notif.weeklyInterval) {
+            const nextWeekTime = new Date(schedTime.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString();
+            const updatedSchedule: Notification = {
+              ...notif,
+              scheduledTime: nextWeekTime, // Slide 1 week ahead
+            };
+            await dbSaveNotification(updatedSchedule);
+          } else {
+            const updatedSchedule: Notification = {
+              ...notif,
+              sent: true,
+              sentAt: now.toISOString()
+            };
+            await dbSaveNotification(updatedSchedule);
+          }
+        }
+      }
+    };
+
+    checkScheduledNotifications();
+    const interval = setInterval(checkScheduledNotifications, 15000);
+    return () => clearInterval(interval);
+  }, [notifications, isFirebaseLoading]);
+
+  // Auto-dismiss active notification toast after 8 seconds
+  useEffect(() => {
+    if (activeNotificationToast) {
+      const timer = setTimeout(() => {
+        setActiveNotificationToast(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [activeNotificationToast]);
 
   // Sync to Firestore on changes
   const saveState = (
@@ -798,7 +930,7 @@ export default function App() {
   const handleAdminPromptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const pin = adminPromptPin;
-    const isPendingAdmin = pendingAdminAction && ['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense'].includes(pendingAdminAction.type);
+    const isPendingAdmin = pendingAdminAction && ['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type);
     
     let authorized = false;
 
@@ -909,7 +1041,7 @@ export default function App() {
   };
 
   const handleRevertTransaction = (txId: string) => {
-    if (isAdminMode || isBookingAuthorized) {
+    if (isAdminMode) {
       executeRevertTransaction(txId);
     } else {
       setPendingAdminAction({ type: 'revert_transaction', itemId: txId });
@@ -931,6 +1063,14 @@ export default function App() {
   // Reset entire catalog to default values
   const handleResetCatalogToDefaults = () => {
     saveState(players, DEFAULT_DRINKS, DEFAULT_FINES, transactions);
+  };
+
+  const handleAddNotification = async (notif: Notification) => {
+    await dbSaveNotification(notif);
+  };
+
+  const handleDeleteNotification = async (notifId: string) => {
+    await dbDeleteNotification(notifId);
   };
 
   // Calculate individual player balance
@@ -1627,7 +1767,7 @@ export default function App() {
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Lock className="w-4 h-4 text-amber-600" />
-                {['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type)
+                {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type)
                   ? 'Admin-Freigabe erforderlich'
                   : 'Buchungs-Passwort erforderlich'}
               </h3>
@@ -1640,7 +1780,7 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              {['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type)
+              {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type)
                 ? 'Diese Aktion ist nur für Admins gestattet. Bitte gib den Admin-PIN ein.'
                 : 'Schreibende Buchungen sind passwortgeschützt. Bitte gib das Passwort ein.'}
             </p>
@@ -1649,7 +1789,7 @@ export default function App() {
               <div>
                 <input
                   type="password"
-                  placeholder={['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type)
+                  placeholder={['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type)
                     ? 'Admin-PIN'
                     : 'Passwort'}
                   value={adminPromptPin}
@@ -1724,6 +1864,9 @@ export default function App() {
                     onUpdateDrinks={handleUpdateDrinks}
                     onUpdateFines={handleUpdateFines}
                     onResetToDefaults={handleResetCatalogToDefaults}
+                    notifications={notifications}
+                    onAddNotification={handleAddNotification}
+                    onDeleteNotification={handleDeleteNotification}
                   />
                 </div>
               ) : (
@@ -1776,6 +1919,43 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Real-time Push Notification Toast Overlay */}
+      <AnimatePresence>
+        {activeNotificationToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md px-4"
+          >
+            <div className="bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700/50 p-4 flex gap-3 items-start backdrop-blur-md bg-opacity-95">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#FF6B00] to-amber-500 flex items-center justify-center shrink-0 shadow-lg shadow-orange-500/20 animate-bounce">
+                <Bell className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black uppercase tracking-wider text-amber-400">Neue Push-Nachricht</span>
+                  {activeNotificationToast.targetTeam !== 'all' && (
+                    <span className="text-[8px] bg-slate-800 text-slate-300 font-bold px-1.5 py-0.5 rounded-full">
+                      {activeNotificationToast.targetTeam}
+                    </span>
+                  )}
+                </div>
+                <h4 className="font-bold text-sm text-white mt-0.5">{activeNotificationToast.title}</h4>
+                <p className="text-xs text-slate-300 mt-1 leading-relaxed">{activeNotificationToast.message}</p>
+              </div>
+              <button
+                onClick={() => setActiveNotificationToast(null)}
+                className="text-slate-400 hover:text-white hover:bg-slate-800 p-1 rounded-lg transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

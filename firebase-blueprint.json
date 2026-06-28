@@ -139,6 +139,46 @@
         }
       },
       "required": ["id", "title", "amount", "date"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "A notification sent to the team, either immediately or scheduled",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["manual", "scheduled"]
+        },
+        "scheduledTime": {
+          "type": "string",
+          "description": "An ISO timestamp or formatted string describing when to send"
+        },
+        "targetTeam": {
+          "type": "string",
+          "description": "The team filter to apply (e.g., Herren 1, Herren 2, all)"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sent": {
+          "type": "boolean"
+        },
+        "sentAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "title", "message", "type", "createdAt", "sent"]
     }
   },
   "firestore": {
@@ -161,6 +201,10 @@
     "expenses": {
       "schema": "Expense",
       "description": "List of team expenses"
+    },
+    "notifications": {
+      "schema": "Notification",
+      "description": "Collection of push notifications"
     }
   }
 }

@@ -9,7 +9,7 @@ import {
   limit
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { Player, Drink, Fine, Transaction, Expense } from '../types';
+import { Player, Drink, Fine, Transaction, Expense, Notification } from '../types';
 
 // Helper to check if database is empty
 export async function isDatabaseEmpty(): Promise<boolean> {
@@ -165,6 +165,26 @@ export async function dbDeleteExpense(expenseId: string): Promise<void> {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
+
+// Notification CRUD
+export async function dbSaveNotification(notif: Notification): Promise<void> {
+  const path = `notifications/${notif.id}`;
+  try {
+    await setDoc(doc(db, 'notifications', notif.id), notif);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function dbDeleteNotification(notifId: string): Promise<void> {
+  const path = `notifications/${notifId}`;
+  try {
+    await deleteDoc(doc(db, 'notifications', notifId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
 
 // Atomic Bulk Operation: Write transactions and update players in a single batch
 export async function dbBulkBook(

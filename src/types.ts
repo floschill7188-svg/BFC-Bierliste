@@ -52,3 +52,17 @@ export interface ClubStats {
   drinksServed: number;
   finesIssuedCount: number;
 }
+
+export interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'manual' | 'scheduled';
+  scheduledTime?: string; // ISO string
+  targetTeam: 'all' | 'Herren 1' | 'Herren 2';
+  createdAt: string;
+  sent: boolean;
+  sentAt?: string;
+  weeklyInterval?: string; // e.g. "Mittwoch 22:30"
+}
+

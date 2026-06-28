@@ -178,7 +178,7 @@ export default function NotificationManager({
 
           {/* Quick Presets */}
           <div className="space-y-1.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Schnell-Vorlagen:</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Vorlagen:</span>
             <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
@@ -194,55 +194,20 @@ export default function NotificationManager({
               >
                 📊 Kontostand prüfen
               </button>
-              <button
-                type="button"
-                onClick={() => applyPreset('🚨 Zahlungserinnerung', 'Bitte denkt daran, eure offenen Beträge in der Mannschaftskasse zu begleichen! Euer Kassenwart.')}
-                className="px-2.5 py-1 bg-white border border-slate-200 hover:border-[#FF6B00] hover:text-[#FF6B00] text-slate-600 rounded-lg text-[10px] font-medium transition cursor-pointer"
-              >
-                🚨 Zahlungserinnerung
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset('🍺 Kaltgetränke aufgefüllt!', 'Der Kühlschrank in der Kabine ist wieder randvoll mit eisgekühltem Bier und Radler! Bedient euch!')}
-                className="px-2.5 py-1 bg-white border border-slate-200 hover:border-[#FF6B00] hover:text-[#FF6B00] text-slate-600 rounded-lg text-[10px] font-medium transition cursor-pointer"
-              >
-                🍺 Bier aufgefüllt
-              </button>
-              <button
-                type="button"
-                onClick={() => applyPreset('🏀 Sonderspieler-Sitzung', 'Wichtige Mannschaftssitzung direkt nach dem nächsten Training am Mittwoch um 21:45 Uhr in der Kabine!')}
-                className="px-2.5 py-1 bg-white border border-slate-200 hover:border-[#FF6B00] hover:text-[#FF6B00] text-slate-600 rounded-lg text-[10px] font-medium transition cursor-pointer"
-              >
-                🏀 Sitzung planen
-              </button>
             </div>
           </div>
 
           <form onSubmit={handleSendOrSchedule} className="space-y-4">
-            {/* Title & Team */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div className="sm:col-span-2">
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Betreff / Titel</label>
-                <input
-                  type="text"
-                  placeholder="z.B. Mahnung oder Spieltag-Kasten"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] text-slate-800 font-semibold"
-                />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">Empfänger (Team)</label>
-                <select
-                  value={targetTeam}
-                  onChange={(e) => setTargetTeam(e.target.value as any)}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] text-slate-800 font-semibold"
-                >
-                  <option value="all">Alle Spieler</option>
-                  <option value="Herren 1">Herren 1</option>
-                  <option value="Herren 2">Herren 2</option>
-                </select>
-              </div>
+            {/* Title */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-500 block mb-1">Betreff / Titel (Freie Benachrichtigung)</label>
+              <input
+                type="text"
+                placeholder="z.B. Getränke eintragen, offener Beitrag..."
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] text-slate-800 font-semibold"
+              />
             </div>
 
             {/* Message Body */}
@@ -393,10 +358,6 @@ export default function NotificationManager({
                               ? new Date(n.scheduledTime).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })
                               : n.scheduledTime}
                         </span>
-                        <span className="text-[8px] bg-slate-200 text-slate-600 px-1 rounded-sm font-bold flex items-center gap-0.5">
-                          <Users className="w-2 h-2" />
-                          {n.targetTeam === 'all' ? 'Alle' : n.targetTeam}
-                        </span>
                       </div>
                     </div>
                     <button
@@ -436,8 +397,6 @@ export default function NotificationManager({
                       <p className="text-[9px] text-slate-400 truncate">{n.message}</p>
                       <div className="flex gap-1.5 mt-1 text-[8px] text-slate-400 font-mono">
                         <span>Gesendet am: {new Date(n.sentAt || n.createdAt).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                        <span>•</span>
-                        <span>Gruppe: {n.targetTeam === 'all' ? 'Alle' : n.targetTeam}</span>
                       </div>
                     </div>
                     <button

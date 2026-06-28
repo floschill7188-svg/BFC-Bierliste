@@ -158,7 +158,7 @@ function setupFirestoreListeners() {
     snapshot.docChanges().forEach(async (change) => {
       if (change.type === 'added' || change.type === 'modified') {
         const notif = change.doc.data();
-        if (notif.sent && notif.sentAt) {
+        if (notif.sent && notif.sentAt && notif.type === 'manual') {
           if (!processedNotifications.has(notif.id)) {
             processedNotifications.add(notif.id);
             console.log(`[FIRESTORE] Active notification triggered: "${notif.title}". Broadcasting Web Push...`);

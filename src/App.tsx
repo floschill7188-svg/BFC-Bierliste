@@ -150,79 +150,92 @@ export default function App() {
 
     const initFirebaseApp = async () => {
       setIsFirebaseLoading(true);
-      await initAuth();
-      const empty = await isDatabaseEmpty();
-      if (empty) {
-        const initialPlayers = DEMO_PLAYERS;
-        const initialDrinks = DEFAULT_DRINKS;
-        const initialFines = DEFAULT_FINES;
-        const initialExpenses = DEMO_EXPENSES;
-        
-        // Generate consistent initial transaction logs for demo players
-        const initialTransactions: Transaction[] = [];
-        const baseTime = Date.now();
+      try {
+        await initAuth();
+        const empty = await isDatabaseEmpty();
+        if (empty) {
+          const initialPlayers = DEMO_PLAYERS;
+          const initialDrinks = DEFAULT_DRINKS;
+          const initialFines = DEFAULT_FINES;
+          const initialExpenses = DEMO_EXPENSES;
+          
+          // Generate consistent initial transaction logs for demo players
+          const initialTransactions: Transaction[] = [];
+          const baseTime = Date.now();
 
-        initialPlayers.forEach((player, pIdx) => {
-          let orderOffset = 0;
+          initialPlayers.forEach((player, pIdx) => {
+            let orderOffset = 0;
 
-          // Generate Drink consumption transactions
-          Object.entries(player.drinksCount).forEach(([drinkId, qty]) => {
-            const drink = initialDrinks.find(d => d.id === drinkId);
-            if (drink) {
-              initialTransactions.push({
-                id: `tx-init-drink-${player.id}-${drinkId}`,
-                playerId: player.id,
-                playerName: player.name,
-                type: 'drink',
-                itemId: drinkId,
-                itemName: drink.name,
-                amount: drink.price,
-                quantity: qty,
-                timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
-              });
-              orderOffset++;
-            }
-          });
-
-          // Generate Fines transactions
-          Object.entries(player.finesCount).forEach(([fineId, qty]) => {
-            const fine = initialFines.find(f => f.id === fineId);
-            if (fine) {
-              initialTransactions.push({
-                id: `tx-init-fine-${player.id}-${fineId}`,
-                playerId: player.id,
-                playerName: player.name,
-                type: 'fine',
-                itemId: fineId,
-                itemName: fine.name,
-                amount: fine.amount,
-                quantity: qty,
-                timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
-              });
-              orderOffset++;
-            }
-          });
-
-          // Generate Settle/Payment transaction
-          if (player.totalPaid > 0) {
-            initialTransactions.push({
-              id: `tx-init-pay-${player.id}`,
-              playerId: player.id,
-              playerName: player.name,
-              type: 'payment',
-              itemName: 'Abrechnung Teilzahlung',
-              amount: player.totalPaid,
-              quantity: 1,
-              timestamp: new Date(baseTime - (pIdx * 3600000)).toISOString()
+            // Generate Drink consumption transactions
+            Object.entries(player.drinksCount).forEach(([drinkId, qty]) => {
+              const drink = initialDrinks.find(d => d.id === drinkId);
+              if (drink) {
+                initialTransactions.push({
+                  id: `tx-init-drink-${player.id}-${drinkId}`,
+                  playerId: player.id,
+                  playerName: player.name,
+                  type: 'drink',
+                  itemId: drinkId,
+                  itemName: drink.name,
+                  amount: drink.price,
+                  quantity: qty,
+                  timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
+                });
+                orderOffset++;
+              }
             });
-          }
-        });
 
-        await seedDatabase(initialPlayers, initialDrinks, initialFines, initialTransactions, initialExpenses);
+            // Generate Fines transactions
+            Object.entries(player.finesCount).forEach(([fineId, qty]) => {
+              const fine = initialFines.find(f => f.id === fineId);
+              if (fine) {
+                initialTransactions.push({
+                  id: `tx-init-fine-${player.id}-${fineId}`,
+                  playerId: player.id,
+                  playerName: player.name,
+                  type: 'fine',
+                  itemId: fineId,
+                  itemName: fine.name,
+                  amount: fine.amount,
+                  quantity: qty,
+                  timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
+                });
+                orderOffset++;
+              }
+            });
+
+            // Generate Settle/Payment transaction
+            if (player.totalPaid > 0) {
+              initialTransactions.push({
+                id: `tx-init-pay-${player.id}`,
+                playerId: player.id,
+                playerName: player.name,
+                type: 'payment',
+                itemName: 'Abrechnung Teilzahlung',
+                amount: player.totalPaid,
+                quantity: 1,
+                timestamp: new Date(baseTime - (pIdx * 3600000)).toISOString()
+              });
+            }
+          });
+
+          await seedDatabase(initialPlayers, initialDrinks, initialFines, initialTransactions, initialExpenses);
+        }
+        setupSubscriptions();
+      } catch (err) {
+        console.error("Firebase init failed, falling back to subscription setup / local defaults:", err);
+        try {
+          setupSubscriptions();
+        } catch (subErr) {
+          console.error("Subscriptions also failed:", subErr);
+          setPlayers(DEMO_PLAYERS);
+          setDrinks(DEFAULT_DRINKS);
+          setFines(DEFAULT_FINES);
+          setExpenses(DEMO_EXPENSES);
+        }
+      } finally {
+        setIsFirebaseLoading(false);
       }
-
-      setupSubscriptions();
-      setIsFirebaseLoading(false);
     };
 
     initFirebaseApp();

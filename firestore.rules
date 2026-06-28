@@ -1,56 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global safety net (Default Deny)
     match /{document=**} {
-      allow read, write: if false;
-    }
-
-    // Primitives
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
-    // Players collection
-    match /players/{playerId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(playerId);
-    }
-
-    // Drinks collection
-    match /drinks/{drinkId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(drinkId);
-    }
-
-    // Fines collection
-    match /fines/{fineId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(fineId);
-    }
-
-    // Transactions collection
-    match /transactions/{transactionId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(transactionId);
-    }
-
-    // Expenses collection
-    match /expenses/{expenseId} {
-      allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isValidId(expenseId);
+      allow read, write: if true;
     }
   }
 }

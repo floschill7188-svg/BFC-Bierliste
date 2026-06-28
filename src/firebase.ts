@@ -13,8 +13,14 @@ export const initAuth = async () => {
     if (!auth.currentUser) {
       await signInAnonymously(auth);
     }
-  } catch (error) {
-    console.error('Failed to sign in anonymously:', error);
+  } catch (error: any) {
+    // If anonymous sign-in is restricted (e.g. disabled in the Firebase Console),
+    // log it as a warning. The app continues to function as firestore.rules allow public access.
+    if (error && error.code === 'auth/admin-restricted-operation') {
+      console.warn('Firebase Anonymous Auth is disabled in the Firebase Console. Continuing in public access mode.');
+    } else {
+      console.warn('Failed to sign in anonymously (continuing in public access mode):', error);
+    }
   }
 };
 

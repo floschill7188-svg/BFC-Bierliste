@@ -1,0 +1,166 @@
+{
+  "entities": {
+    "Player": {
+      "title": "Player",
+      "description": "A basketball team player with their jersey number and cumulative balances",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the player"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full name of the player"
+        },
+        "number": {
+          "type": "string",
+          "description": "Jersey number of the player"
+        },
+        "drinksCount": {
+          "type": "object",
+          "description": "Map of drinkId to quantity consumed"
+        },
+        "finesCount": {
+          "type": "object",
+          "description": "Map of fineId to quantity incurred"
+        },
+        "totalPaid": {
+          "type": "number",
+          "description": "Total amount paid/settled by this player"
+        },
+        "teams": {
+          "type": "array",
+          "description": "List of team filters this player belongs to"
+        }
+      },
+      "required": ["id", "name", "drinksCount", "finesCount", "totalPaid"]
+    },
+    "Drink": {
+      "title": "Drink",
+      "description": "A catalog drink item available for purchase",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "price": {
+          "type": "number"
+        },
+        "isActive": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "name", "price", "isActive"]
+    },
+    "Fine": {
+      "title": "Fine",
+      "description": "A catalog fine item that can be issued",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "isActive": {
+          "type": "boolean"
+        }
+      },
+      "required": ["id", "name", "amount", "isActive"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "An audit log entry of a drink consumption, fine, or payment",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "playerId": {
+          "type": "string"
+        },
+        "playerName": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["drink", "fine", "payment"]
+        },
+        "itemId": {
+          "type": "string"
+        },
+        "itemName": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "quantity": {
+          "type": "number"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "playerId", "playerName", "type", "itemName", "amount", "quantity", "timestamp"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "An expense incurred by the club paid from the cash register",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "amount": {
+          "type": "number"
+        },
+        "date": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "createdBy": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "title", "amount", "date"]
+    }
+  },
+  "firestore": {
+    "players": {
+      "schema": "Player",
+      "description": "Collection of basketball players and their state"
+    },
+    "drinks": {
+      "schema": "Drink",
+      "description": "Collection of catalog drinks"
+    },
+    "fines": {
+      "schema": "Fine",
+      "description": "Collection of catalog fines"
+    },
+    "transactions": {
+      "schema": "Transaction",
+      "description": "Log of all drink, fine, and payment events"
+    },
+    "expenses": {
+      "schema": "Expense",
+      "description": "List of team expenses"
+    }
+  }
+}

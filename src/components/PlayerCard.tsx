@@ -1,6 +1,6 @@
 import React from 'react';
 import { Player, Drink, Fine } from '../types';
-import { User, Beer, AlertTriangle, ShieldCheck, Plus, Euro } from 'lucide-react';
+import { User, Beer, AlertTriangle, ShieldCheck, Plus, Euro, Lock } from 'lucide-react';
 
 interface PlayerCardProps {
   key?: React.Key;
@@ -10,6 +10,7 @@ interface PlayerCardProps {
   onAddDrink: (playerId: string, drinkId: string) => void;
   onAddFine: (playerId: string, fineId: string) => void;
   onOpenDetails: (player: Player) => void;
+  isAuthorized: boolean;
 }
 
 export default function PlayerCard({
@@ -19,6 +20,7 @@ export default function PlayerCard({
   onAddDrink,
   onAddFine,
   onOpenDetails,
+  isAuthorized,
 }: PlayerCardProps) {
   // Calculate total costs
   const totalDrinksCost = Object.entries(player.drinksCount).reduce((acc, [drinkId, qty]) => {
@@ -111,17 +113,23 @@ export default function PlayerCard({
         className="flex items-center gap-1.5 pt-2 mt-auto border-t border-slate-100"
         onClick={(e) => e.stopPropagation()} // Prevent opening details modal when quick booking is clicked
       >
-        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Quick:</span>
+        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+          {isAuthorized ? 'Quick:' : '🔒 Lock:'}
+        </span>
 
         {popularDrinks.map((drink) => (
           <button
             key={drink.id}
             onClick={() => onAddDrink(player.id, drink.id)}
             className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white hover:bg-[#FF6B00] hover:text-white hover:border-[#FF6B00] border border-slate-200 rounded-lg text-[11px] font-medium text-slate-700 transition-all shadow-xs"
-            title={`${drink.name} buchen (${drink.price.toFixed(2)} €)`}
+            title={isAuthorized ? `${drink.name} buchen (${drink.price.toFixed(2)} €)` : `${drink.name} (Freigabe erforderlich)`}
             id={`quick-drink-${player.id}-${drink.id}`}
           >
-            <Plus className="w-3 h-3 text-[#FF6B00] group-hover:text-white" />
+            {isAuthorized ? (
+              <Plus className="w-3 h-3 text-[#FF6B00] group-hover:text-white" />
+            ) : (
+              <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+            )}
             <span className="truncate">{drink.name.split(' ')[0]}</span>
           </button>
         ))}
@@ -130,10 +138,14 @@ export default function PlayerCard({
           <button
             onClick={() => onAddFine(player.id, fines[0].id)}
             className="flex items-center justify-center p-1.5 bg-white hover:bg-amber-600/10 hover:text-amber-600 hover:border-amber-400 border border-slate-200 rounded-lg transition-all shadow-xs"
-            title={`Strafe buchen: ${fines[0].name} (${fines[0].amount.toFixed(2)} €)`}
+            title={isAuthorized ? `Strafe buchen: ${fines[0].name} (${fines[0].amount.toFixed(2)} €)` : `Strafe buchen (Freigabe erforderlich)`}
             id={`quick-fine-${player.id}`}
           >
-            <Plus className="w-3 h-3 text-amber-500" />
+            {isAuthorized ? (
+              <Plus className="w-3 h-3 text-amber-500" />
+            ) : (
+              <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+            )}
           </button>
         )}
       </div>

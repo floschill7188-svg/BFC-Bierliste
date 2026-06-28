@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Player, Drink, Fine, Transaction } from '../types';
-import { X, Trash2, Plus, Minus, CreditCard, History, Edit2, Check, UserPlus, Save, AlertTriangle } from 'lucide-react';
+import { X, Trash2, Plus, Minus, CreditCard, History, Edit2, Check, UserPlus, Save, AlertTriangle, Lock } from 'lucide-react';
 
 interface PlayerDetailModalProps {
   player: Player | null;
@@ -16,6 +16,7 @@ interface PlayerDetailModalProps {
   onUpdatePlayer: (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => void;
   onDeletePlayer: (id: string) => void;
   isAdminMode: boolean;
+  isAuthorized: boolean;
   onTriggerAdminPrompt: (actionType: 'edit_player' | 'delete_player') => void;
 }
 
@@ -33,6 +34,7 @@ export default function PlayerDetailModal({
   onUpdatePlayer,
   onDeletePlayer,
   isAdminMode,
+  isAuthorized,
   onTriggerAdminPrompt,
 }: PlayerDetailModalProps) {
   if (!player) return null;
@@ -71,10 +73,6 @@ export default function PlayerDetailModal({
   const handleSavePlayerInfo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editName.trim()) return;
-    if (!isAdminMode) {
-      onTriggerAdminPrompt('edit_player');
-      return;
-    }
     onUpdatePlayer(player.id, editName.trim(), editNumber.trim() || undefined, editTeams);
     setIsEditing(false);
   };
@@ -282,15 +280,25 @@ export default function PlayerDetailModal({
                                 ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                                 : 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed'
                             }`}
+                            title={!isAuthorized ? "Freigabe erforderlich" : undefined}
                           >
-                            <Minus className="w-3.5 h-3.5" />
+                            {!isAuthorized && count > 0 ? (
+                              <Lock className="w-3.5 h-3.5 text-slate-400" />
+                            ) : (
+                              <Minus className="w-3.5 h-3.5" />
+                            )}
                           </button>
                           <span className="font-mono font-bold text-sm text-slate-800 w-6 text-center">{count}</span>
                           <button
                             onClick={() => onAddDrink(player.id, drink.id)}
-                            className="p-1.5 bg-orange-50 hover:bg-[#FF6B00] border border-orange-200 hover:border-[#FF6B00] text-[#FF6B00] hover:text-white rounded-lg transition cursor-pointer"
+                            className="p-1.5 bg-orange-50 hover:bg-[#FF6B00] border border-orange-200 hover:border-[#FF6B00] text-[#FF6B00] hover:text-white rounded-lg transition cursor-pointer flex items-center justify-center"
+                            title={!isAuthorized ? "Freigabe erforderlich" : undefined}
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            {isAuthorized ? (
+                              <Plus className="w-3.5 h-3.5" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5" />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -326,15 +334,25 @@ export default function PlayerDetailModal({
                                 ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                                 : 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed'
                             }`}
+                            title={!isAuthorized ? "Freigabe erforderlich" : undefined}
                           >
-                            <Minus className="w-3.5 h-3.5" />
+                            {!isAuthorized && count > 0 ? (
+                              <Lock className="w-3.5 h-3.5 text-slate-400" />
+                            ) : (
+                              <Minus className="w-3.5 h-3.5" />
+                            )}
                           </button>
                           <span className="font-mono font-bold text-sm text-slate-800 w-6 text-center">{count}</span>
                           <button
                             onClick={() => onAddFine(player.id, fine.id)}
-                            className="p-1.5 bg-amber-50 hover:bg-amber-500 border border-amber-200 hover:border-amber-500 text-amber-600 hover:text-white rounded-lg transition cursor-pointer"
+                            className="p-1.5 bg-amber-50 hover:bg-amber-500 border border-amber-200 hover:border-amber-500 text-amber-600 hover:text-white rounded-lg transition cursor-pointer flex items-center justify-center"
+                            title={!isAuthorized ? "Freigabe erforderlich" : undefined}
                           >
-                            <Plus className="w-3.5 h-3.5" />
+                            {isAuthorized ? (
+                              <Plus className="w-3.5 h-3.5" />
+                            ) : (
+                              <Lock className="w-3.5 h-3.5" />
+                            )}
                           </button>
                         </div>
                       </div>
@@ -369,18 +387,20 @@ export default function PlayerDetailModal({
 
                   <button
                     type="submit"
-                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm px-4 py-2 rounded-lg transition active:scale-95 shrink-0 cursor-pointer"
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm px-4 py-2 rounded-lg transition active:scale-95 shrink-0 cursor-pointer flex items-center gap-1.5"
                   >
-                    Einzahlen
+                    {!isAuthorized && <Lock className="w-3.5 h-3.5 text-emerald-200" />}
+                    <span>Einzahlen</span>
                   </button>
 
                   {balance > 0 && (
                     <button
                       type="button"
                       onClick={handleSettleFull}
-                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-sm px-4 py-2 rounded-lg transition shrink-0 cursor-pointer shadow-2xs"
+                      className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-sm px-4 py-2 rounded-lg transition shrink-0 cursor-pointer shadow-2xs flex items-center gap-1.5"
                     >
-                      Alles ({balance.toFixed(2)} €) begleichen
+                      {!isAuthorized && <Lock className="w-3.5 h-3.5 text-slate-400" />}
+                      <span>Alles ({balance.toFixed(2)} €) begleichen</span>
                     </button>
                   )}
                 </form>

@@ -1,20 +1,29 @@
 import React, { useState } from 'react';
 import { Player, Drink, Fine } from '../types';
-import { Zap, Beer, AlertTriangle, Users, Check, Circle, CheckCircle2 } from 'lucide-react';
+import { Zap, Beer, AlertTriangle, Users, Check, Circle, CheckCircle2, Lock } from 'lucide-react';
 
 interface QuickBookingProps {
   players: Player[];
   drinks: Drink[];
   fines: Fine[];
   onBulkBook: (playerIds: string[], type: 'drink' | 'fine', itemId: string) => void;
+  isAuthorized: boolean;
 }
 
-export default function QuickBooking({ players, drinks, fines, onBulkBook }: QuickBookingProps) {
+export default function QuickBooking({ players, drinks, fines, onBulkBook, isAuthorized }: QuickBookingProps) {
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
   const [bookingType, setBookingType] = useState<'drink' | 'fine'>('drink');
   const [selectedItemId, setSelectedItemId] = useState<string>('');
 
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Clear selections when authorization state changes to unlocked
+  React.useEffect(() => {
+    if (isAuthorized) {
+      setSelectedPlayerIds([]);
+      setSelectedItemId('');
+    }
+  }, [isAuthorized]);
 
   const togglePlayerSelect = (id: string) => {
     setSelectedPlayerIds((prev) =>
@@ -43,23 +52,25 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook }: Qui
 
     onBulkBook(selectedPlayerIds, bookingType, selectedItemId);
 
-    const itemName =
-      bookingType === 'drink'
-        ? drinks.find((d) => d.id === selectedItemId)?.name
-        : fines.find((f) => f.id === selectedItemId)?.name;
+    if (isAuthorized) {
+      const itemName =
+        bookingType === 'drink'
+          ? drinks.find((d) => d.id === selectedItemId)?.name
+          : fines.find((f) => f.id === selectedItemId)?.name;
 
-    setMessage({
-      text: `Erfolgreich "${itemName}" für ${selectedPlayerIds.length} Spieler gebucht!`,
-      isError: false,
-    });
+      setMessage({
+        text: `Erfolgreich "${itemName}" für ${selectedPlayerIds.length} Spieler gebucht!`,
+        isError: false,
+      });
 
-    // Clear selections
-    setSelectedPlayerIds([]);
-    setSelectedItemId('');
+      // Clear selections
+      setSelectedPlayerIds([]);
+      setSelectedItemId('');
 
-    setTimeout(() => {
-      setMessage(null);
-    }, 4000);
+      setTimeout(() => {
+        setMessage(null);
+      }, 4000);
+    }
   };
 
   // Set default selected item when changing type
@@ -214,8 +225,12 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook }: Qui
           type="submit"
           className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition active:scale-95 duration-150 shadow-sm cursor-pointer"
         >
-          <Zap className="w-3.5 h-3.5" />
-          Sammelbuchung durchführen
+          {isAuthorized ? (
+            <Zap className="w-3.5 h-3.5" />
+          ) : (
+            <Lock className="w-3.5 h-3.5 text-orange-200" />
+          )}
+          <span>{isAuthorized ? "Sammelbuchung durchführen" : "Freigabe zum Buchen erforderlich"}</span>
         </button>
       </form>
     </div>

@@ -2,6 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { Player, Drink, Fine, Transaction, ClubStats, Expense } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
+import { onSnapshot, collection } from 'firebase/firestore';
+import { db, initAuth } from './firebase';
+import { 
+  isDatabaseEmpty, 
+  seedDatabase,
+  dbSavePlayer,
+  dbDeletePlayer,
+  dbSaveDrink,
+  dbDeleteDrink,
+  dbSaveFine,
+  dbDeleteFine,
+  dbSaveTransaction,
+  dbDeleteTransaction,
+  dbSaveExpense,
+  dbDeleteExpense
+} from './lib/db';
 import PlayerDetailModal from './components/PlayerDetailModal';
 import CatalogManager from './components/CatalogManager';
 import QuickBooking from './components/QuickBooking';
@@ -31,6 +47,7 @@ import {
 
 export default function App() {
   // --- STATE ---
+  const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
   const [players, setPlayers] = useState<Player[]>([]);
   const [drinks, setDrinks] = useState<Drink[]>([]);
   const [fines, setFines] = useState<Fine[]>([]);
@@ -45,7 +62,7 @@ export default function App() {
   
   // Pending Admin/Booking action state
   const [pendingAdminAction, setPendingAdminAction] = useState<{
-    type: 'record_fine' | 'remove_fine' | 'bulk_fine' | 'add_player' | 'edit_player' | 'delete_player' | 'record_drink' | 'remove_drink' | 'record_payment' | 'revert_transaction' | 'bulk_drink' | 'open_catalog';
+    type: 'record_fine' | 'remove_fine' | 'bulk_fine' | 'add_player' | 'edit_player' | 'delete_player' | 'record_drink' | 'remove_drink' | 'record_payment' | 'revert_transaction' | 'bulk_drink' | 'open_catalog' | 'add_expense' | 'delete_expense';
     playerId?: string;
     fineId?: string;
     playerIds?: string[];
@@ -69,152 +86,271 @@ export default function App() {
   const [showBackupPanel, setShowBackupPanel] = useState(false);
   const [backupMessage, setBackupMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
-  // --- INITIALIZE FROM LOCALSTORAGE OR DEFAULTS ---
+  // --- INITIALIZE FROM FIRESTORE OR DEFAULTS ---
   useEffect(() => {
-    const storedPlayers = localStorage.getItem('bb_players');
-    const storedDrinks = localStorage.getItem('bb_drinks');
-    const storedFines = localStorage.getItem('bb_fines');
-    const storedTransactions = localStorage.getItem('bb_transactions');
-    const storedExpenses = localStorage.getItem('bb_expenses');
+    let unsubPlayers: () => void;
+    let unsubDrinks: () => void;
+    let unsubFines: () => void;
+    let unsubTransactions: () => void;
+    let unsubExpenses: () => void;
 
-    const initializeWithDefaults = () => {
-      const initialPlayers = DEMO_PLAYERS;
-      const initialDrinks = DEFAULT_DRINKS;
-      const initialFines = DEFAULT_FINES;
-      const initialExpenses = DEMO_EXPENSES;
-      
-      // Generate consistent initial transaction logs for demo players
-      const initialTransactions: Transaction[] = [];
-      const baseTime = Date.now();
-
-      initialPlayers.forEach((player, pIdx) => {
-        let orderOffset = 0;
-
-        // Generate Drink consumption transactions
-        Object.entries(player.drinksCount).forEach(([drinkId, qty]) => {
-          const drink = initialDrinks.find(d => d.id === drinkId);
-          if (drink) {
-            initialTransactions.push({
-              id: `tx-init-drink-${player.id}-${drinkId}`,
-              playerId: player.id,
-              playerName: player.name,
-              type: 'drink',
-              itemId: drinkId,
-              itemName: drink.name,
-              amount: drink.price,
-              quantity: qty,
-              timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
-            });
-            orderOffset++;
-          }
+    const setupSubscriptions = () => {
+      unsubPlayers = onSnapshot(collection(db, 'players'), (snapshot) => {
+        const playersList: Player[] = [];
+        snapshot.forEach((doc) => {
+          playersList.push(doc.data() as Player);
         });
-
-        // Generate Fines transactions
-        Object.entries(player.finesCount).forEach(([fineId, qty]) => {
-          const fine = initialFines.find(f => f.id === fineId);
-          if (fine) {
-            initialTransactions.push({
-              id: `tx-init-fine-${player.id}-${fineId}`,
-              playerId: player.id,
-              playerName: player.name,
-              type: 'fine',
-              itemId: fineId,
-              itemName: fine.name,
-              amount: fine.amount,
-              quantity: qty,
-              timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
-            });
-            orderOffset++;
-          }
-        });
-
-        // Generate Settle/Payment transaction
-        if (player.totalPaid > 0) {
-          initialTransactions.push({
-            id: `tx-init-pay-${player.id}`,
-            playerId: player.id,
-            playerName: player.name,
-            type: 'payment',
-            itemName: 'Abrechnung Teilzahlung',
-            amount: player.totalPaid,
-            quantity: 1,
-            timestamp: new Date(baseTime - (pIdx * 3600000)).toISOString()
-          });
-        }
+        setPlayers(playersList);
+      }, (err) => {
+        console.error("Failed to load players: ", err);
       });
 
-      setPlayers(initialPlayers);
-      setDrinks(initialDrinks);
-      setFines(initialFines);
-      setTransactions(initialTransactions);
-      setExpenses(initialExpenses);
+      unsubDrinks = onSnapshot(collection(db, 'drinks'), (snapshot) => {
+        const drinksList: Drink[] = [];
+        snapshot.forEach((doc) => {
+          drinksList.push(doc.data() as Drink);
+        });
+        setDrinks(drinksList);
+      }, (err) => {
+        console.error("Failed to load drinks: ", err);
+      });
 
-      localStorage.setItem('bb_players', JSON.stringify(initialPlayers));
-      localStorage.setItem('bb_drinks', JSON.stringify(initialDrinks));
-      localStorage.setItem('bb_fines', JSON.stringify(initialFines));
-      localStorage.setItem('bb_transactions', JSON.stringify(initialTransactions));
-      localStorage.setItem('bb_expenses', JSON.stringify(initialExpenses));
+      unsubFines = onSnapshot(collection(db, 'fines'), (snapshot) => {
+        const finesList: Fine[] = [];
+        snapshot.forEach((doc) => {
+          finesList.push(doc.data() as Fine);
+        });
+        setFines(finesList);
+      }, (err) => {
+        console.error("Failed to load fines: ", err);
+      });
+
+      unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
+        const txList: Transaction[] = [];
+        snapshot.forEach((doc) => {
+          txList.push(doc.data() as Transaction);
+        });
+        txList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        setTransactions(txList);
+      }, (err) => {
+        console.error("Failed to load transactions: ", err);
+      });
+
+      unsubExpenses = onSnapshot(collection(db, 'expenses'), (snapshot) => {
+        const expensesList: Expense[] = [];
+        snapshot.forEach((doc) => {
+          expensesList.push(doc.data() as Expense);
+        });
+        expensesList.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setExpenses(expensesList);
+      }, (err) => {
+        console.error("Failed to load expenses: ", err);
+      });
     };
 
-    if (storedPlayers && storedDrinks && storedFines && storedTransactions) {
-      try {
-        const parsedPlayers = JSON.parse(storedPlayers);
-        const isOldRoster = parsedPlayers.some((p: any) => p.name === 'Christian (Kapitän)');
-        if (isOldRoster) {
-          initializeWithDefaults();
-        } else {
-          setPlayers(parsedPlayers);
-          setDrinks(JSON.parse(storedDrinks));
-          setFines(JSON.parse(storedFines));
-          setTransactions(JSON.parse(storedTransactions));
-          
-          if (storedExpenses) {
-            setExpenses(JSON.parse(storedExpenses));
-          } else {
-            setExpenses(DEMO_EXPENSES);
-            localStorage.setItem('bb_expenses', JSON.stringify(DEMO_EXPENSES));
+    const initFirebaseApp = async () => {
+      setIsFirebaseLoading(true);
+      await initAuth();
+      const empty = await isDatabaseEmpty();
+      if (empty) {
+        const initialPlayers = DEMO_PLAYERS;
+        const initialDrinks = DEFAULT_DRINKS;
+        const initialFines = DEFAULT_FINES;
+        const initialExpenses = DEMO_EXPENSES;
+        
+        // Generate consistent initial transaction logs for demo players
+        const initialTransactions: Transaction[] = [];
+        const baseTime = Date.now();
+
+        initialPlayers.forEach((player, pIdx) => {
+          let orderOffset = 0;
+
+          // Generate Drink consumption transactions
+          Object.entries(player.drinksCount).forEach(([drinkId, qty]) => {
+            const drink = initialDrinks.find(d => d.id === drinkId);
+            if (drink) {
+              initialTransactions.push({
+                id: `tx-init-drink-${player.id}-${drinkId}`,
+                playerId: player.id,
+                playerName: player.name,
+                type: 'drink',
+                itemId: drinkId,
+                itemName: drink.name,
+                amount: drink.price,
+                quantity: qty,
+                timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
+              });
+              orderOffset++;
+            }
+          });
+
+          // Generate Fines transactions
+          Object.entries(player.finesCount).forEach(([fineId, qty]) => {
+            const fine = initialFines.find(f => f.id === fineId);
+            if (fine) {
+              initialTransactions.push({
+                id: `tx-init-fine-${player.id}-${fineId}`,
+                playerId: player.id,
+                playerName: player.name,
+                type: 'fine',
+                itemId: fineId,
+                itemName: fine.name,
+                amount: fine.amount,
+                quantity: qty,
+                timestamp: new Date(baseTime - (pIdx * 3600000 + orderOffset * 600000)).toISOString()
+              });
+              orderOffset++;
+            }
+          });
+
+          // Generate Settle/Payment transaction
+          if (player.totalPaid > 0) {
+            initialTransactions.push({
+              id: `tx-init-pay-${player.id}`,
+              playerId: player.id,
+              playerName: player.name,
+              type: 'payment',
+              itemName: 'Abrechnung Teilzahlung',
+              amount: player.totalPaid,
+              quantity: 1,
+              timestamp: new Date(baseTime - (pIdx * 3600000)).toISOString()
+            });
           }
-        }
-      } catch (e) {
-        initializeWithDefaults();
+        });
+
+        await seedDatabase(initialPlayers, initialDrinks, initialFines, initialTransactions, initialExpenses);
       }
-    } else {
-      initializeWithDefaults();
-    }
+
+      setupSubscriptions();
+      setIsFirebaseLoading(false);
+    };
+
+    initFirebaseApp();
+
+    return () => {
+      if (unsubPlayers) unsubPlayers();
+      if (unsubDrinks) unsubDrinks();
+      if (unsubFines) unsubFines();
+      if (unsubTransactions) unsubTransactions();
+      if (unsubExpenses) unsubExpenses();
+    };
   }, []);
 
-  // Sync to local storage on changes
-  const saveState = (updatedPlayers: Player[], updatedDrinks: Drink[], updatedFines: Fine[], updatedTransactions: Transaction[]) => {
+  // Sync to Firestore on changes
+  const saveState = (
+    updatedPlayers: Player[], 
+    updatedDrinks: Drink[], 
+    updatedFines: Fine[], 
+    updatedTransactions: Transaction[]
+  ) => {
+    // 1. Sync Players
+    updatedPlayers.forEach(player => {
+      const existingPlayer = players.find(p => p.id === player.id);
+      if (!existingPlayer || JSON.stringify(existingPlayer) !== JSON.stringify(player)) {
+        dbSavePlayer(player);
+      }
+    });
+    players.forEach(player => {
+      if (!updatedPlayers.some(p => p.id === player.id)) {
+        dbDeletePlayer(player.id);
+      }
+    });
+
+    // 2. Sync Drinks
+    updatedDrinks.forEach(drink => {
+      const existingDrink = drinks.find(d => d.id === drink.id);
+      if (!existingDrink || JSON.stringify(existingDrink) !== JSON.stringify(drink)) {
+        dbSaveDrink(drink);
+      }
+    });
+    drinks.forEach(drink => {
+      if (!updatedDrinks.some(d => d.id === drink.id)) {
+        dbDeleteDrink(drink.id);
+      }
+    });
+
+    // 3. Sync Fines
+    updatedFines.forEach(fine => {
+      const existingFine = fines.find(f => f.id === fine.id);
+      if (!existingFine || JSON.stringify(existingFine) !== JSON.stringify(fine)) {
+        dbSaveFine(fine);
+      }
+    });
+    fines.forEach(fine => {
+      if (!updatedFines.some(f => f.id === fine.id)) {
+        dbDeleteFine(fine.id);
+      }
+    });
+
+    // 4. Sync Transactions
+    updatedTransactions.forEach(tx => {
+      const existingTx = transactions.find(t => t.id === tx.id);
+      if (!existingTx || JSON.stringify(existingTx) !== JSON.stringify(tx)) {
+        dbSaveTransaction(tx);
+      }
+    });
+    transactions.forEach(tx => {
+      if (!updatedTransactions.some(t => t.id === tx.id)) {
+        dbDeleteTransaction(tx.id);
+      }
+    });
+
+    // Optimistically set local state
     setPlayers(updatedPlayers);
     setDrinks(updatedDrinks);
     setFines(updatedFines);
     setTransactions(updatedTransactions);
-
-    localStorage.setItem('bb_players', JSON.stringify(updatedPlayers));
-    localStorage.setItem('bb_drinks', JSON.stringify(updatedDrinks));
-    localStorage.setItem('bb_fines', JSON.stringify(updatedFines));
-    localStorage.setItem('bb_transactions', JSON.stringify(updatedTransactions));
   };
 
-  // Save expenses to local storage
+  // Save expenses to Firestore
   const saveExpenses = (updatedExpenses: Expense[]) => {
+    updatedExpenses.forEach(exp => {
+      const existingExp = expenses.find(e => e.id === exp.id);
+      if (!existingExp || JSON.stringify(existingExp) !== JSON.stringify(exp)) {
+        dbSaveExpense(exp);
+      }
+    });
+    expenses.forEach(exp => {
+      if (!updatedExpenses.some(e => e.id === exp.id)) {
+        dbDeleteExpense(exp.id);
+      }
+    });
+
+    // Optimistically set local state
     setExpenses(updatedExpenses);
-    localStorage.setItem('bb_expenses', JSON.stringify(updatedExpenses));
   };
 
   // Add a new expense
   const handleAddExpense = (expenseData: Omit<Expense, 'id'>) => {
-    const newExpense: Expense = {
-      ...expenseData,
-      id: 'e_' + Date.now()
-    };
-    saveExpenses([newExpense, ...expenses]);
+    if (isAdminMode) {
+      const newExpense: Expense = {
+        ...expenseData,
+        id: 'e_' + Date.now()
+      };
+      saveExpenses([newExpense, ...expenses]);
+    } else {
+      setPendingAdminAction({ 
+        type: 'add_expense', 
+        itemId: JSON.stringify(expenseData) 
+      });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
   };
 
   // Delete an expense
   const handleDeleteExpense = (id: string) => {
-    const updatedExpenses = expenses.filter(e => e.id !== id);
-    saveExpenses(updatedExpenses);
+    if (isAdminMode) {
+      const updatedExpenses = expenses.filter(e => e.id !== id);
+      saveExpenses(updatedExpenses);
+    } else {
+      setPendingAdminAction({ 
+        type: 'delete_expense', 
+        itemId: id 
+      });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
   };
 
   // --- ACTIONS ---
@@ -222,6 +358,7 @@ export default function App() {
   // Add a new Player
   const handleAddPlayer = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isAdminMode) return;
     if (!newPlayerName.trim()) return;
 
     const newPlayer: Player = {
@@ -515,8 +652,8 @@ export default function App() {
     }
   };
 
-  // Edit player name/number/teams
-  const handleUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => {
+  // Edit player name/number/teams (actual execution)
+  const executeUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => {
     const updatedPlayers = players.map(p => (p.id === id ? { 
       ...p, 
       name, 
@@ -541,12 +678,36 @@ export default function App() {
     }
   };
 
-  // Delete Player entirely
-  const handleDeletePlayer = (id: string) => {
+  const handleUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => {
+    if (isAdminMode) {
+      executeUpdatePlayer(id, name, number, teams);
+    } else {
+      setPendingAdminAction({ 
+        type: 'edit_player', 
+        playerId: id, 
+        itemId: JSON.stringify({ name, number, teams }) 
+      });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
+  };
+
+  // Delete Player entirely (actual execution)
+  const executeDeletePlayer = (id: string) => {
     const updatedPlayers = players.filter(p => p.id !== id);
     const updatedTx = transactions.filter(t => t.playerId !== id);
     saveState(updatedPlayers, drinks, fines, updatedTx);
     setSelectedPlayer(null);
+  };
+
+  const handleDeletePlayer = (id: string) => {
+    if (isAdminMode) {
+      executeDeletePlayer(id);
+    } else {
+      setPendingAdminAction({ type: 'delete_player', playerId: id });
+      setAdminPromptPin('');
+      setAdminPromptError('');
+    }
   };
 
   // Execute actual bulk booking
@@ -624,7 +785,7 @@ export default function App() {
   const handleAdminPromptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const pin = adminPromptPin;
-    const isPendingAdmin = pendingAdminAction && ['add_player', 'edit_player', 'delete_player', 'open_catalog'].includes(pendingAdminAction.type);
+    const isPendingAdmin = pendingAdminAction && ['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense'].includes(pendingAdminAction.type);
     
     let authorized = false;
 
@@ -661,11 +822,32 @@ export default function App() {
           executeRevertTransaction(itemId);
         } else if (type === 'add_player') {
           setIsNewPlayerModalOpen(true);
+        } else if (type === 'edit_player' && playerId && itemId) {
+          try {
+            const data = JSON.parse(itemId);
+            executeUpdatePlayer(playerId, data.name, data.number, data.teams);
+          } catch (e) {
+            console.error(e);
+          }
         } else if (type === 'delete_player' && playerId) {
-          handleDeletePlayer(playerId);
+          executeDeletePlayer(playerId);
           setSelectedPlayer(null);
         } else if (type === 'open_catalog') {
           setIsCatalogOpen(true);
+        } else if (type === 'add_expense' && itemId) {
+          try {
+            const expenseData = JSON.parse(itemId);
+            const newExpense: Expense = {
+              ...expenseData,
+              id: 'e_' + Date.now()
+            };
+            saveExpenses([newExpense, ...expenses]);
+          } catch (e) {
+            console.error(e);
+          }
+        } else if (type === 'delete_expense' && itemId) {
+          const updatedExpenses = expenses.filter(e => e.id !== itemId);
+          saveExpenses(updatedExpenses);
         }
       }
       
@@ -865,6 +1047,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-850 font-sans antialiased selection:bg-orange-500/10 selection:text-orange-900">
       
+      {isFirebaseLoading && (
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-50/95 backdrop-blur-xs animate-fade-in">
+          <div className="w-16 h-16 bg-gradient-to-br from-[#FF6B00] to-amber-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/15 animate-bounce mb-4">
+            <Dribbble className="w-10 h-10 animate-spin-slow text-white" />
+          </div>
+          <p className="text-sm font-semibold text-slate-700 animate-pulse">Lade Mannschaftskasse...</p>
+        </div>
+      )}
+      
       {/* HEADER BANNER */}
       <header className="relative bg-white border-b border-slate-200 px-4 py-6 md:py-8 overflow-hidden shadow-xs">
         
@@ -908,6 +1099,34 @@ export default function App() {
               <Settings className="w-4 h-4 text-[#FF6B00]" />
               Tarife & Strafen
             </button>
+            {isBookingAuthorized || isAdminMode ? (
+              <button
+                onClick={() => {
+                  setIsBookingAuthorized(false);
+                  setIsAdminMode(false);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                id="global-lock-btn"
+                title="Buchungen wieder sperren"
+              >
+                <Unlock className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <span>Freigegeben</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setPendingAdminAction({ type: 'open_catalog' });
+                  setAdminPromptPin('');
+                  setAdminPromptError('');
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                id="global-unlock-btn"
+                title="PIN / Passwort eingeben"
+              >
+                <Lock className="w-4 h-4 text-rose-600" />
+                <span>Gesperrt</span>
+              </button>
+            )}
             <button
               onClick={() => {
                 if (isAdminMode) {
@@ -1193,6 +1412,7 @@ export default function App() {
                     onAddDrink={handleRecordDrink}
                     onAddFine={handleRecordFine}
                     onOpenDetails={setSelectedPlayer}
+                    isAuthorized={isBookingAuthorized || isAdminMode}
                   />
                 ))
               )}
@@ -1222,6 +1442,7 @@ export default function App() {
               drinks={drinks}
               fines={fines}
               onBulkBook={handleBulkBook}
+              isAuthorized={isBookingAuthorized || isAdminMode}
             />
 
             {/* Global History activity log */}
@@ -1263,6 +1484,7 @@ export default function App() {
             onUpdatePlayer={handleUpdatePlayer}
             onDeletePlayer={handleDeletePlayer}
             isAdminMode={isAdminMode}
+            isAuthorized={isBookingAuthorized || isAdminMode}
             onTriggerAdminPrompt={(actionType) => {
               setPendingAdminAction({ type: actionType, playerId: selectedPlayer.id });
               setAdminPromptPin('');

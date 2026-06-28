@@ -183,8 +183,8 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
           navigator.serviceWorker.ready.then((reg) => {
             reg.showNotification('🏀 BFC Freiburg Kassenwart', {
               body: 'Test erfolgreich! So landen Nachrichten auf deinem Handy, selbst wenn die App geschlossen ist! 🚀',
-              icon: '/assets/icon.png',
-              badge: '/assets/icon.png',
+              icon: '/icon.png',
+              badge: '/icon.png',
               vibrate: [200, 100, 200],
               tag: 'bfc_test_push_' + Date.now(),
               data: {
@@ -195,7 +195,7 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
         } else {
           new Notification('🏀 BFC Freiburg Kassenwart', {
             body: 'Test erfolgreich! Native Benachrichtigung wurde empfangen! 🚀',
-            icon: '/assets/icon.png',
+            icon: '/icon.png',
             tag: 'bfc_test_push_' + Date.now()
           });
         }

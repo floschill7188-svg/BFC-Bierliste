@@ -16,8 +16,8 @@ self.addEventListener('push', (event) => {
     const title = data.title || 'BFC Freiburg';
     const options = {
       body: data.message || '',
-      icon: '/assets/icon.png', // Fallback icon path
-      badge: '/assets/icon.png',
+      icon: '/icon.png', // Fallback icon path
+      badge: '/icon.png',
       vibrate: [200, 100, 200],
       data: {
         url: data.url || self.location.origin

@@ -140,16 +140,23 @@ const processedNotifications = new Set<string>();
 function setupFirestoreListeners() {
   console.log("[FIRESTORE] Initializing real-time listeners for manual & scheduled broadcasts...");
 
+  let isInitialLoad = true;
+
   onSnapshot(collection(db, 'notifications'), (snapshot) => {
+    if (isInitialLoad) {
+      snapshot.forEach((doc) => {
+        processedNotifications.add(doc.id);
+      });
+      isInitialLoad = false;
+      console.log(`[FIRESTORE] Initial batch of ${processedNotifications.size} notifications cached. Ignoring for real-time broadcast.`);
+      return;
+    }
+
     snapshot.docChanges().forEach(async (change) => {
       if (change.type === 'added' || change.type === 'modified') {
         const notif = change.doc.data();
         if (notif.sent && notif.sentAt) {
-          const sentTime = new Date(notif.sentAt).getTime();
-          const nowTime = Date.now();
-
-          // Only push if created/sent within the last 5 minutes, and hasn't been broadcast yet
-          if (nowTime - sentTime < 300000 && !processedNotifications.has(notif.id)) {
+          if (!processedNotifications.has(notif.id)) {
             processedNotifications.add(notif.id);
             console.log(`[FIRESTORE] Active notification triggered: "${notif.title}". Broadcasting Web Push...`);
             const sent = await broadcastPushNotification(notif.title, notif.message);

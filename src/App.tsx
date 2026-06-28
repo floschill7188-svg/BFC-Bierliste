@@ -164,6 +164,7 @@ export default function App() {
         console.error("Failed to load expenses: ", err);
       });
 
+      let isInitialNotifBatch = true;
       unsubNotifications = onSnapshot(collection(db, 'notifications'), (snapshot) => {
         const notifList: AppNotification[] = [];
         snapshot.forEach((doc) => {
@@ -171,70 +172,78 @@ export default function App() {
         });
         setNotifications(notifList);
 
+        if (isInitialNotifBatch) {
+          isInitialNotifBatch = false;
+          // Pre-populate seen notification IDs so they aren't triggered
+          const initialIds = notifList.filter(n => n.sent).map(n => n.id);
+          setLastProcessedNotificationIds((prev) => {
+            const merged = Array.from(new Set([...prev, ...initialIds]));
+            localStorage.setItem('bb_seen_notifications', JSON.stringify(merged));
+            return merged;
+          });
+          return;
+        }
+
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added' || change.type === 'modified') {
             const notif = change.doc.data() as AppNotification;
             if (notif.sent && notif.sentAt) {
               setLastProcessedNotificationIds((prev) => {
                 if (!prev.includes(notif.id)) {
-                  const sentTime = new Date(notif.sentAt!).getTime();
-                  const nowTime = Date.now();
-                  // Only trigger sound & toast if sent within last 20 seconds to prevent popups on initial load
-                  if (nowTime - sentTime < 20000) {
-                    setActiveNotificationToast(notif);
-                    
-                    // Trigger a real native OS Notification if permissions are granted
-                    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-                      try {
-                        if ('serviceWorker' in navigator) {
-                          navigator.serviceWorker.ready.then((reg) => {
-                            reg.showNotification(notif.title, {
-                              body: notif.message,
-                              icon: '/assets/icon.png',
-                              badge: '/assets/icon.png',
-                              tag: notif.id,
-                              vibrate: [200, 100, 200],
-                              data: {
-                                // @ts-ignore
-                                url: window.location.origin
-                              }
-                            } as any);
-                          });
-                        } else {
-                          new Notification(notif.title, {
+                  setActiveNotificationToast(notif);
+                  
+                  // Trigger a real native OS Notification if permissions are granted
+                  if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                    try {
+                      if ('serviceWorker' in navigator) {
+                        navigator.serviceWorker.ready.then((reg) => {
+                          reg.showNotification(notif.title, {
                             body: notif.message,
                             icon: '/assets/icon.png',
-                            tag: notif.id
-                          });
-                        }
-                      } catch (nativeErr) {
-                        console.warn("Native Notification trigger failed:", nativeErr);
+                            badge: '/assets/icon.png',
+                            tag: notif.id,
+                            vibrate: [200, 100, 200],
+                            data: {
+                              // @ts-ignore
+                              url: window.location.origin
+                            }
+                          } as any);
+                        });
+                      } else {
+                        new Notification(notif.title, {
+                          body: notif.message,
+                          icon: '/assets/icon.png',
+                          tag: notif.id
+                        });
                       }
-                    }
-
-                    try {
-                      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-                      if (AudioContextClass) {
-                        const audioCtx = new AudioContextClass();
-                        const playNote = (freq: number, delay: number, duration: number) => {
-                          const osc = audioCtx.createOscillator();
-                          const gain = audioCtx.createGain();
-                          osc.type = 'sine';
-                          osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
-                          gain.gain.setValueAtTime(0.1, audioCtx.currentTime + delay);
-                          gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + duration);
-                          osc.connect(gain);
-                          gain.connect(audioCtx.destination);
-                          osc.start(audioCtx.currentTime + delay);
-                          osc.stop(audioCtx.currentTime + delay + duration);
-                        };
-                        playNote(523.25, 0, 0.25); // C5
-                        playNote(659.25, 0.12, 0.35); // E5
-                      }
-                    } catch (soundErr) {
-                      console.warn("Audio chime failed to play:", soundErr);
+                    } catch (nativeErr) {
+                      console.warn("Native Notification trigger failed:", nativeErr);
                     }
                   }
+
+                  try {
+                    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+                    if (AudioContextClass) {
+                      const audioCtx = new AudioContextClass();
+                      const playNote = (freq: number, delay: number, duration: number) => {
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
+                        gain.gain.setValueAtTime(0.1, audioCtx.currentTime + delay);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + duration);
+                        osc.connect(gain);
+                        gain.connect(audioCtx.destination);
+                        osc.start(audioCtx.currentTime + delay);
+                        osc.stop(audioCtx.currentTime + delay + duration);
+                      };
+                      playNote(523.25, 0, 0.25); // C5
+                      playNote(659.25, 0.12, 0.35); // E5
+                    }
+                  } catch (soundErr) {
+                    console.warn("Audio chime failed to play:", soundErr);
+                  }
+
                   const updated = [...prev, notif.id];
                   localStorage.setItem('bb_seen_notifications', JSON.stringify(updated));
                   return updated;

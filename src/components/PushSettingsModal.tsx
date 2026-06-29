@@ -42,6 +42,10 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
   const [testSuccess, setTestSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [debugData, setDebugData] = useState<any>(null);
+  const [showDebug, setShowDebug] = useState(false);
+  const [isDebugLoading, setIsDebugLoading] = useState(false);
+
   const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
   const isStandalone = typeof window !== 'undefined' && (window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone);
 
@@ -54,6 +58,27 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
     }
     return devId;
   };
+
+  const fetchDebugData = async () => {
+    setIsDebugLoading(true);
+    try {
+      const res = await fetch('/api/debug-push');
+      if (res.ok) {
+        const data = await res.json();
+        setDebugData(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch debug data', e);
+    } finally {
+      setIsDebugLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOpen && showDebug) {
+      fetchDebugData();
+    }
+  }, [isOpen, showDebug]);
 
   useEffect(() => {
     const silentRegister = async () => {
@@ -267,6 +292,7 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
       } else {
         setTimeout(() => {
           setTestSuccess(false);
+          fetchDebugData();
         }, 5000);
       }
     } catch (e: any) {
@@ -453,6 +479,158 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
             <p className="text-[10px] text-slate-500 leading-relaxed">
               Wenn die App geschlossen ist, wird ein registrierter <strong>Service Worker</strong> im Hintergrund deines Betriebssystems aktiv gehalten. Deine Geräteadresse wird in unserer <strong>Firestore-Datenbank</strong> verschlüsselt gespeichert, damit der Kassenwart dich bei neuen Einträgen direkt auf dem Sperrbildschirm deines Handys erreichen kann.
             </p>
+          </div>
+
+          {/* Collapsible Diagnostic Section */}
+          <div className="border border-slate-200 rounded-2xl overflow-hidden bg-slate-50/50">
+            <button
+              type="button"
+              onClick={() => {
+                setShowDebug(!showDebug);
+                if (!showDebug) fetchDebugData();
+              }}
+              className="w-full px-4 py-3 bg-slate-100 hover:bg-slate-200 transition flex items-center justify-between font-bold text-xs text-slate-700 cursor-pointer"
+            >
+              <div className="flex items-center gap-1.5">
+                <HelpCircle className="w-4 h-4 text-slate-500" />
+                <span>⚙️ Entwickler-Diagnose & Server-Logs</span>
+              </div>
+              <span className="text-[10px] text-slate-400 bg-white border border-slate-200 px-2 py-0.5 rounded-md font-mono">
+                {showDebug ? 'AUSBLENDEN' : 'ANZEIGEN'}
+              </span>
+            </button>
+
+            {showDebug && (
+              <div className="p-4 space-y-4 border-t border-slate-200 text-[11px] text-slate-600 bg-white">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div>
+                    <span className="font-bold text-slate-800">Dieses Gerät ID:</span>
+                    <code className="ml-1.5 bg-slate-50 px-1.5 py-0.5 rounded border text-[10px] font-mono text-[#FF6B00]">
+                      {getDeviceId()}
+                    </code>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchDebugData}
+                    disabled={isDebugLoading}
+                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                  >
+                    <span>🔄 {isDebugLoading ? 'Lädt...' : 'Aktualisieren'}</span>
+                  </button>
+                </div>
+
+                {/* Subscriptions List */}
+                <div className="space-y-2">
+                  <h5 className="font-bold text-slate-800 flex items-center gap-1">
+                    <span>📱 Registrierte Geräte in der Cloud ({debugData?.subscriptions?.length || 0}):</span>
+                  </h5>
+                  {debugData?.subscriptions && debugData.subscriptions.length > 0 ? (
+                    <div className="max-h-36 overflow-y-auto border border-slate-100 rounded-lg p-1.5 space-y-1.5 bg-slate-50/50">
+                      {debugData.subscriptions.map((sub: any) => {
+                        const isCurrentDevice = sub.id === getDeviceId();
+                        let platform = 'Unbekannt';
+                        if (sub.endpoint === 'local_notification_api_granted') {
+                          platform = 'Lokal (Fallback - Keine echten Pushs)';
+                        } else if (sub.endpoint?.includes('fcm.googleapis.com')) {
+                          platform = 'Google FCM (Android/Chrome)';
+                        } else if (sub.endpoint?.includes('apple.com')) {
+                          platform = 'Apple APNS (Safari/iOS)';
+                        } else if (sub.endpoint?.includes('mozilla.com')) {
+                          platform = 'Mozilla (Firefox)';
+                        }
+
+                        return (
+                          <div
+                            key={sub.id}
+                            className={`p-2 rounded border text-[10px] leading-normal ${
+                              isCurrentDevice 
+                                ? 'bg-amber-50/75 border-[#FF6B00]/40' 
+                                : 'bg-white border-slate-200/80'
+                            }`}
+                          >
+                            <div className="flex justify-between items-start">
+                              <span className="font-bold font-mono text-slate-800">
+                                ID: {sub.id.substring(0, 12)}... 
+                                {isCurrentDevice && (
+                                  <span className="ml-1 bg-[#FF6B00] text-white text-[8px] font-black px-1.5 py-0.2 rounded-full uppercase">
+                                    Dieses Gerät ⭐
+                                  </span>
+                                )}
+                              </span>
+                              <span className="text-[9px] text-slate-400">
+                                {sub.subscribedAt ? new Date(sub.subscribedAt).toLocaleString('de-DE') : ''}
+                              </span>
+                            </div>
+                            <div className="text-slate-500 mt-1 flex flex-col gap-0.5">
+                              <div><strong>Typ:</strong> {platform}</div>
+                              <div className="truncate text-[9px] text-slate-400 font-mono">
+                                <strong>Endpoint:</strong> {sub.endpoint}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400 italic">Keine Geräte registriert.</p>
+                  )}
+                </div>
+
+                {/* Server Logs */}
+                <div className="space-y-2">
+                  <h5 className="font-bold text-slate-800 flex items-center gap-1">
+                    <span>📡 Zustellungs-Protokolle (Letzte 10):</span>
+                  </h5>
+                  {debugData?.logs && debugData.logs.length > 0 ? (
+                    <div className="max-y-40 overflow-y-auto border border-slate-100 rounded-lg p-1.5 space-y-1.5 bg-slate-50/50">
+                      {debugData.logs.slice(0, 10).map((log: any) => {
+                        const isCurrentDevice = log.deviceId === getDeviceId();
+                        const isError = log.status === 'error';
+                        return (
+                          <div key={log.id} className="bg-white p-2 rounded border border-slate-200/80 text-[10px] leading-normal">
+                            <div className="flex justify-between items-center pb-1 border-b border-slate-50">
+                              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                                isError ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              }`}>
+                                {log.status}
+                              </span>
+                              <span className="text-[9px] text-slate-400">
+                                {log.timestamp ? new Date(log.timestamp).toLocaleTimeString('de-DE') : ''}
+                              </span>
+                            </div>
+                            <div className="mt-1 text-slate-600">
+                              <div>
+                                <strong>Aktion:</strong> <span className="font-semibold text-slate-800">{log.details?.action || 'Test'}</span>
+                              </div>
+                              {log.details?.message && (
+                                <div className={`mt-0.5 text-[9px] font-mono leading-tight ${isError ? 'text-red-600 font-semibold' : 'text-slate-500'}`}>
+                                  <strong>Fehler:</strong> {log.details.message}
+                                </div>
+                              )}
+                              {log.details?.statusCode && (
+                                <div className="text-[9px] text-slate-400 font-mono">
+                                  <strong>Status-Code:</strong> {log.details.statusCode}
+                                </div>
+                              )}
+                              {log.details?.body && (
+                                <div className="text-[8px] text-slate-400 max-h-12 overflow-y-auto font-mono bg-slate-50 p-1 rounded mt-1 border">
+                                  {log.details.body}
+                                </div>
+                              )}
+                              <div className="text-[8px] text-slate-400 mt-1 font-mono">
+                                <strong>Gerät:</strong> {log.deviceId.substring(0, 12)}... {isCurrentDevice && '(Dieses)'}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-slate-400 italic">Noch keine Sendeversuche durchgeführt.</p>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
         </div>

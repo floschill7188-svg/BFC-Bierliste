@@ -60,6 +60,21 @@ async function initializeVapid() {
   }
 }
 
+// Write push status results to Firestore to enable real-time debugging of VAPID delivery errors
+async function logPushEvent(deviceId: string, status: 'success' | 'error', details: any) {
+  try {
+    const logId = `${deviceId}_${Date.now()}`;
+    await setDoc(doc(db, 'push_logs', logId), {
+      deviceId,
+      status,
+      details,
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    console.error("[LOG] Failed to write push log to Firestore:", err);
+  }
+}
+
 // Broadcasts native Web Push notification payload to all registered active devices
 async function broadcastPushNotification(title: string, message: string) {
   let successCount = 0;
@@ -92,8 +107,15 @@ async function broadcastPushNotification(title: string, message: string) {
       try {
         await webpush.sendNotification(subscription, payload);
         successCount++;
+        await logPushEvent(id, 'success', { action: 'broadcast', title });
       } catch (err: any) {
         console.warn(`[PUSH] Send failed for device ${id}:`, err.message);
+        await logPushEvent(id, 'error', {
+          action: 'broadcast',
+          message: err.message,
+          statusCode: err.statusCode || null,
+          body: err.body || null
+        });
         // Automatically prune expired or removed push endpoints (status 410 Gone / 404 Not Found)
         if (err.statusCode === 410 || err.statusCode === 404) {
           console.log(`[PUSH] Cleaning up expired subscription: ${id}`);
@@ -181,12 +203,53 @@ app.post('/api/test-push', async (req, res) => {
         console.log(`[PUSH] Sending delayed single-device test push to device ${deviceId}...`);
         await webpush.sendNotification(subscription, payload);
         console.log(`[PUSH] Delayed single-device test push sent successfully to ${deviceId}.`);
+        await logPushEvent(deviceId, 'success', { action: 'test-push', message: 'Delayed test push sent successfully.' });
       } catch (err: any) {
         console.warn(`[PUSH] Delayed single-device test push failed for ${deviceId}:`, err.message);
+        await logPushEvent(deviceId, 'error', {
+          action: 'test-push',
+          message: err.message,
+          statusCode: err.statusCode || null,
+          body: err.body || null
+        });
       }
     }, 4000);
 
     res.json({ success: true, delayed: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 2c. Diagnostic Endpoint to view subscriptions and push logs
+app.get('/api/debug-push', async (req, res) => {
+  try {
+    const subSnap = await getDocs(collection(db, 'push_subscriptions'));
+    const subs: any[] = [];
+    subSnap.docs.forEach((docSnap) => {
+      subs.push({
+        id: docSnap.id,
+        ...docSnap.data()
+      });
+    });
+
+    const logsSnap = await getDocs(collection(db, 'push_logs'));
+    const logs: any[] = [];
+    logsSnap.docs.forEach((docSnap) => {
+      logs.push({
+        id: docSnap.id,
+        ...docSnap.data()
+      });
+    });
+    // Sort logs descending by timestamp
+    logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    res.json({
+      vapidKeyConfigured: !!vapidKeys,
+      publicKey: vapidKeys?.publicKey,
+      subscriptions: subs,
+      logs: logs.slice(0, 30) // last 30 logs
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

@@ -1894,7 +1894,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Real-time Push Notification Toast Overlay */}
+      {/* Real-time App Notification Toast Overlay */}
       <AnimatePresence>
         {activeNotificationToast && (
           <motion.div
@@ -1910,7 +1910,7 @@ export default function App() {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-amber-400">Neue Push-Nachricht</span>
+                  <span className="text-xs font-black uppercase tracking-wider text-amber-400">Neue Benachrichtigung</span>
                   {activeNotificationToast.targetTeam !== 'all' && (
                     <span className="text-[8px] bg-slate-800 text-slate-300 font-bold px-1.5 py-0.5 rounded-full">
                       {activeNotificationToast.targetTeam}

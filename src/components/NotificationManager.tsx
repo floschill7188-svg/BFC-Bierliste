@@ -87,7 +87,7 @@ export default function NotificationManager({
         sent: true,
         sentAt: nowStr
       };
-      setStatusMsg({ text: 'Push-Nachricht wurde sofort an alle Spieler gesendet! 🚀', isError: false });
+      setStatusMsg({ text: 'Benachrichtigung wurde sofort an alle Spieler gesendet! 🚀', isError: false });
     } else if (scheduleMode === 'weekly') {
       const scheduledISO = getNextWeeklyOccurrence(weeklyDay, weeklyTime);
       newNotif = {
@@ -101,7 +101,7 @@ export default function NotificationManager({
         createdAt: nowStr,
         sent: false,
       };
-      setStatusMsg({ text: `Push-Nachricht geplant: Jeden ${weeklyDay} um ${weeklyTime} Uhr! 📅`, isError: false });
+      setStatusMsg({ text: `Benachrichtigung geplant: Jeden ${weeklyDay} um ${weeklyTime} Uhr! 📅`, isError: false });
     } else {
       // Once mode
       if (!onceDate) {
@@ -128,7 +128,7 @@ export default function NotificationManager({
         sent: false,
       };
       setStatusMsg({ 
-        text: `Push-Nachricht einmalig geplant für den ${day.toString().padStart(2, '0')}.${month.toString().padStart(2, '0')}.${year} um ${onceTime} Uhr! 📅`, 
+        text: `Benachrichtigung einmalig geplant für den ${day.toString().padStart(2, '0')}.${month.toString().padStart(2, '0')}.${year} um ${onceTime} Uhr! 📅`, 
         isError: false 
       });
     }
@@ -214,7 +214,7 @@ export default function NotificationManager({
             <div>
               <label className="text-[10px] font-bold text-slate-500 block mb-1">Nachrichtentext</label>
               <textarea
-                placeholder="Schreibe hier die Mitteilung, die an die Handys bzw. Bildschirme der Spieler gepusht wird..."
+                placeholder="Schreibe hier die Mitteilung, die auf den Bildschirmen der Spieler angezeigt wird..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 rows={3}
@@ -315,12 +315,12 @@ export default function NotificationManager({
               {scheduleMode === 'instant' ? (
                 <>
                   <Send className="w-3.5 h-3.5" />
-                  Push-Nachricht sofort abfeuern 🚀
+                  Mitteilung sofort senden 🚀
                 </>
               ) : (
                 <>
                   <Calendar className="w-3.5 h-3.5" />
-                  Als geplante Push-Mitteilung speichern 📅
+                  Als geplante Mitteilung speichern 📅
                 </>
               )}
             </button>

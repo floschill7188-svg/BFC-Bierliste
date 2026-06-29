@@ -207,7 +207,7 @@ export default function CatalogManager({
           }`}
           id="tab-notifications-btn"
         >
-          📢 Push-Mitteilungen ({notifications.length})
+          📢 Mitteilungen ({notifications.length})
         </button>
       </div>
 
@@ -417,7 +417,7 @@ export default function CatalogManager({
         </div>
       )}
 
-      {/* NOTIFICATIONS PUSH VIEW */}
+      {/* NOTIFICATIONS VIEW */}
       {activeTab === 'notifications' && (
         <NotificationManager
           notifications={notifications}

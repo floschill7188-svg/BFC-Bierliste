@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Player, Drink, Fine, Transaction, ClubStats, Expense, Notification as AppNotification } from './types';
+import { Player, Drink, Fine, Transaction, ClubStats, Expense } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
 import { onSnapshot, collection } from 'firebase/firestore';
@@ -16,9 +16,7 @@ import {
   dbSaveTransaction,
   dbDeleteTransaction,
   dbSaveExpense,
-  dbDeleteExpense,
-  dbSaveNotification,
-  dbDeleteNotification
+  dbDeleteExpense
 } from './lib/db';
 import PlayerDetailModal from './components/PlayerDetailModal';
 import CatalogManager from './components/CatalogManager';
@@ -46,6 +44,7 @@ import {
   Lock,
   Unlock,
   Bell,
+  BellOff,
   Volume2
 } from 'lucide-react';
 
@@ -57,16 +56,6 @@ export default function App() {
   const [fines, setFines] = useState<Fine[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
-  const [activeNotificationToast, setActiveNotificationToast] = useState<AppNotification | null>(null);
-  const [lastProcessedNotificationIds, setLastProcessedNotificationIds] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem('bb_seen_notifications');
-      return stored ? JSON.parse(stored) : [];
-    } catch {
-      return [];
-    }
-  });
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
@@ -100,6 +89,61 @@ export default function App() {
   const [showBackupPanel, setShowBackupPanel] = useState(false);
   const [backupMessage, setBackupMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
+  // Local browser notification state
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      return Notification.permission;
+    }
+    return 'default';
+  });
+
+  const requestNotificationPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      alert("Ihr Browser unterstützt leider keine Benachrichtigungen.");
+      return;
+    }
+
+    try {
+      const permission = await Notification.requestPermission();
+      setNotifPermission(permission);
+      if (permission === 'granted') {
+        new Notification("🔔 Benachrichtigungen aktiviert!", {
+          body: "Du wirst ab jetzt benachrichtigt, sobald Getränke oder Strafen eingetragen werden.",
+        });
+      }
+    } catch (err) {
+      console.error("Fehler beim Anfordern der Benachrichtigungs-Berechtigung:", err);
+    }
+  };
+
+  const triggerBrowserNotification = (tx: Transaction) => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+
+    let title = "Mannschaftskasse Update";
+    let body = "";
+
+    if (tx.type === 'drink') {
+      title = `🍻 Getränk gebucht: ${tx.playerName}`;
+      body = `${tx.playerName} hat "${tx.itemName}" eingetragen (${tx.amount.toFixed(2)} €).`;
+    } else if (tx.type === 'fine') {
+      title = `💸 Strafe erhalten: ${tx.playerName}`;
+      body = `${tx.playerName} hat eine Strafe erhalten: "${tx.itemName}" (${tx.amount.toFixed(2)} €).`;
+    } else if (tx.type === 'payment') {
+      title = `💳 Einzahlung: ${tx.playerName}`;
+      body = `${tx.playerName} hat einen Betrag von ${Math.abs(tx.amount).toFixed(2)} € eingezahlt.`;
+    } else if (tx.type === 'expense') {
+      title = `📉 Ausgabe erfasst`;
+      body = `Ausgabe: "${tx.itemName}" (${tx.amount.toFixed(2)} €).`;
+    }
+
+    if (body) {
+      new Notification(title, {
+        body,
+      });
+    }
+  };
+
   // --- INITIALIZE FROM FIRESTORE OR DEFAULTS ---
   useEffect(() => {
     let unsubPlayers: () => void;
@@ -107,7 +151,6 @@ export default function App() {
     let unsubFines: () => void;
     let unsubTransactions: () => void;
     let unsubExpenses: () => void;
-    let unsubNotifications: () => void;
 
     const setupSubscriptions = () => {
       unsubPlayers = onSnapshot(collection(db, 'players'), (snapshot) => {
@@ -140,6 +183,7 @@ export default function App() {
         console.error("Failed to load fines: ", err);
       });
 
+      let isInitialTx = true;
       unsubTransactions = onSnapshot(collection(db, 'transactions'), (snapshot) => {
         const txList: Transaction[] = [];
         snapshot.forEach((doc) => {
@@ -147,6 +191,18 @@ export default function App() {
         });
         txList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
         setTransactions(txList);
+
+        if (isInitialTx) {
+          isInitialTx = false;
+          return;
+        }
+
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const tx = change.doc.data() as Transaction;
+            triggerBrowserNotification(tx);
+          }
+        });
       }, (err) => {
         console.error("Failed to load transactions: ", err);
       });
@@ -160,70 +216,6 @@ export default function App() {
         setExpenses(expensesList);
       }, (err) => {
         console.error("Failed to load expenses: ", err);
-      });
-
-      let isInitialNotifBatch = true;
-      unsubNotifications = onSnapshot(collection(db, 'notifications'), (snapshot) => {
-        const notifList: AppNotification[] = [];
-        snapshot.forEach((doc) => {
-          notifList.push(doc.data() as AppNotification);
-        });
-        setNotifications(notifList);
-
-        if (isInitialNotifBatch) {
-          isInitialNotifBatch = false;
-          // Pre-populate seen notification IDs so they aren't triggered
-          const initialIds = notifList.filter(n => n.sent).map(n => n.id);
-          setLastProcessedNotificationIds((prev) => {
-            const merged = Array.from(new Set([...prev, ...initialIds]));
-            localStorage.setItem('bb_seen_notifications', JSON.stringify(merged));
-            return merged;
-          });
-          return;
-        }
-
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added' || change.type === 'modified') {
-            const notif = change.doc.data() as AppNotification;
-            if (notif.sent && notif.sentAt) {
-              setLastProcessedNotificationIds((prev) => {
-                if (!prev.includes(notif.id)) {
-                  setActiveNotificationToast(notif);
-
-                  try {
-                    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-                    if (AudioContextClass) {
-                      const audioCtx = new AudioContextClass();
-                      const playNote = (freq: number, delay: number, duration: number) => {
-                        const osc = audioCtx.createOscillator();
-                        const gain = audioCtx.createGain();
-                        osc.type = 'sine';
-                        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
-                        gain.gain.setValueAtTime(0.1, audioCtx.currentTime + delay);
-                        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + duration);
-                        osc.connect(gain);
-                        gain.connect(audioCtx.destination);
-                        osc.start(audioCtx.currentTime + delay);
-                        osc.stop(audioCtx.currentTime + delay + duration);
-                      };
-                      playNote(523.25, 0, 0.25); // C5
-                      playNote(659.25, 0.12, 0.35); // E5
-                    }
-                  } catch (soundErr) {
-                    console.warn("Audio chime failed to play:", soundErr);
-                  }
-
-                  const updated = [...prev, notif.id];
-                  localStorage.setItem('bb_seen_notifications', JSON.stringify(updated));
-                  return updated;
-                }
-                return prev;
-              });
-            }
-          }
-        });
-      }, (err) => {
-        console.error("Failed to load notifications: ", err);
       });
     };
 
@@ -325,34 +317,8 @@ export default function App() {
       if (unsubFines) unsubFines();
       if (unsubTransactions) unsubTransactions();
       if (unsubExpenses) unsubExpenses();
-      if (unsubNotifications) unsubNotifications();
     };
   }, []);
-
-  // --- SERVICE WORKER REGISTRATION ---
-  useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js')
-        .then((reg) => {
-          console.log('Service Worker registered successfully with scope:', reg.scope);
-        })
-        .catch((err) => {
-          console.warn('Service Worker registration failed:', err);
-        });
-    }
-  }, []);
-
-
-
-  // Auto-dismiss active notification toast after 8 seconds
-  useEffect(() => {
-    if (activeNotificationToast) {
-      const timer = setTimeout(() => {
-        setActiveNotificationToast(null);
-      }, 8000);
-      return () => clearTimeout(timer);
-    }
-  }, [activeNotificationToast]);
 
   // Sync to Firestore on changes
   const saveState = (
@@ -1038,14 +1004,6 @@ export default function App() {
     saveState(players, DEFAULT_DRINKS, DEFAULT_FINES, transactions);
   };
 
-  const handleAddNotification = async (notif: AppNotification) => {
-    await dbSaveNotification(notif);
-  };
-
-  const handleDeleteNotification = async (notifId: string) => {
-    await dbDeleteNotification(notifId);
-  };
-
   // Calculate individual player balance
   const getPlayerBalance = (player: Player) => {
     const totalDrinksCost = Object.entries(player.drinksCount).reduce((acc, [drinkId, qty]) => {
@@ -1225,6 +1183,44 @@ export default function App() {
               <Settings className="w-4 h-4 text-[#FF6B00]" />
               Tarife & Strafen
             </button>
+
+            {typeof window !== 'undefined' && 'Notification' in window && (
+              <button
+                onClick={requestNotificationPermission}
+                className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs ${
+                  notifPermission === 'granted'
+                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                    : notifPermission === 'denied'
+                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
+                    : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-slate-200'
+                }`}
+                title={
+                  notifPermission === 'granted'
+                    ? 'Browser-Benachrichtigungen sind AKTIVIERT 🔔'
+                    : notifPermission === 'denied'
+                    ? 'Browser-Benachrichtigungen sind BLOCKIERT ❌ (Bitte in den Browser-Einstellungen erlauben)'
+                    : 'Browser-Benachrichtigungen aktivieren 🔔'
+                }
+                id="live-notifs-btn"
+              >
+                {notifPermission === 'granted' ? (
+                  <>
+                    <Bell className="w-4 h-4 text-emerald-600" />
+                    <span>Live-Meldungen: Ein</span>
+                  </>
+                ) : notifPermission === 'denied' ? (
+                  <>
+                    <BellOff className="w-4 h-4 text-rose-600 animate-pulse" />
+                    <span>Live-Meldungen: Blockiert</span>
+                  </>
+                ) : (
+                  <>
+                    <Bell className="w-4 h-4 text-slate-500" />
+                    <span>Live-Meldungen: Aus</span>
+                  </>
+                )}
+              </button>
+            )}
 
             {isBookingAuthorized || isAdminMode ? (
               <button
@@ -1838,9 +1834,6 @@ export default function App() {
                     onUpdateDrinks={handleUpdateDrinks}
                     onUpdateFines={handleUpdateFines}
                     onResetToDefaults={handleResetCatalogToDefaults}
-                    notifications={notifications}
-                    onAddNotification={handleAddNotification}
-                    onDeleteNotification={handleDeleteNotification}
                   />
                 </div>
               ) : (
@@ -1893,45 +1886,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* Real-time App Notification Toast Overlay */}
-      <AnimatePresence>
-        {activeNotificationToast && (
-          <motion.div
-            initial={{ opacity: 0, y: -50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            transition={{ type: "spring", stiffness: 300, damping: 25 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md px-4"
-          >
-            <div className="bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700/50 p-4 flex gap-3 items-start backdrop-blur-md bg-opacity-95">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#FF6B00] to-amber-500 flex items-center justify-center shrink-0 shadow-lg shadow-orange-500/20 animate-bounce">
-                <Bell className="w-5 h-5 text-white" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black uppercase tracking-wider text-amber-400">Neue Benachrichtigung</span>
-                  {activeNotificationToast.targetTeam !== 'all' && (
-                    <span className="text-[8px] bg-slate-800 text-slate-300 font-bold px-1.5 py-0.5 rounded-full">
-                      {activeNotificationToast.targetTeam}
-                    </span>
-                  )}
-                </div>
-                <h4 className="font-bold text-sm text-white mt-0.5">{activeNotificationToast.title}</h4>
-                <p className="text-xs text-slate-300 mt-1 leading-relaxed">{activeNotificationToast.message}</p>
-              </div>
-              <button
-                onClick={() => setActiveNotificationToast(null)}
-                className="text-slate-400 hover:text-white hover:bg-slate-800 p-1 rounded-lg transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-
 
     </div>
   );

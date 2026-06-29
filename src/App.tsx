@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Player, Drink, Fine, Transaction, ClubStats, Expense } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
@@ -104,6 +104,11 @@ export default function App() {
     return false;
   });
 
+  const notificationsMutedRef = useRef(areNotificationsMuted);
+  useEffect(() => {
+    notificationsMutedRef.current = areNotificationsMuted;
+  }, [areNotificationsMuted]);
+
   // Register Service Worker for mobile browser notification support
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
@@ -119,7 +124,7 @@ export default function App() {
 
   const triggerNotificationWithSW = (title: string, body: string) => {
     if (typeof window === 'undefined') return;
-    if (areNotificationsMuted) return;
+    if (notificationsMutedRef.current) return;
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
 
     // Try through service worker (required for Android Chrome and highly robust)
@@ -186,7 +191,7 @@ export default function App() {
   const triggerBrowserNotification = (tx: Transaction) => {
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
-    if (areNotificationsMuted) return;
+    if (notificationsMutedRef.current) return;
 
     let title = "Mannschaftskasse Update";
     let body = "";

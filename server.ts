@@ -144,6 +144,45 @@ app.get('/api/vapid-public-key', (req, res) => {
   }
 });
 
+// 1b. Endpoint: Register/Save Push Subscription (Server-side Firestore persistence)
+app.post('/api/register-push', async (req, res) => {
+  const { id, endpoint, keys, userAgent } = req.body;
+  if (!id) {
+    return res.status(400).json({ error: "Missing parameter: 'id' is required." });
+  }
+  try {
+    const subData = {
+      id,
+      endpoint: endpoint || '',
+      keys: keys || { auth: '', p256dh: '' },
+      subscribedAt: new Date().toISOString(),
+      userAgent: userAgent || ''
+    };
+    await setDoc(doc(db, 'push_subscriptions', id), subData);
+    console.log(`[PUSH_SERVER] Successfully registered device in Firestore: ${id}`);
+    res.json({ success: true, message: "Subscription registered successfully on the server." });
+  } catch (err: any) {
+    console.error("[PUSH_SERVER] Error registering device:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 1c. Endpoint: Delete/Unregister Push Subscription
+app.post('/api/unregister-push', async (req, res) => {
+  const { id } = req.body;
+  if (!id) {
+    return res.status(400).json({ error: "Missing parameter: 'id' is required." });
+  }
+  try {
+    await deleteDoc(doc(db, 'push_subscriptions', id));
+    console.log(`[PUSH_SERVER] Successfully unregistered device from Firestore: ${id}`);
+    res.json({ success: true, message: "Subscription deleted successfully." });
+  } catch (err: any) {
+    console.error("[PUSH_SERVER] Error deleting subscription:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 2. Endpoint: Test Push Broadcast Endpoint
 app.post('/api/trigger-push', async (req, res) => {
   const { title, message } = req.body;

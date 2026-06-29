@@ -187,20 +187,44 @@ export async function dbDeleteNotification(notifId: string): Promise<void> {
 
 // Push Subscription CRUD
 export async function dbSavePushSubscription(sub: PushSubscriptionData): Promise<void> {
-  const path = `push_subscriptions/${sub.id}`;
   try {
-    await setDoc(doc(db, 'push_subscriptions', sub.id), sub);
+    const res = await fetch('/api/register-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub)
+    });
+    if (!res.ok) {
+      throw new Error(`Server returned status ${res.status}`);
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
+    console.warn('Server-side registration failed, falling back to direct Firestore write:', error);
+    const path = `push_subscriptions/${sub.id}`;
+    try {
+      await setDoc(doc(db, 'push_subscriptions', sub.id), sub);
+    } catch (fsError) {
+      handleFirestoreError(fsError, OperationType.WRITE, path);
+    }
   }
 }
 
 export async function dbDeletePushSubscription(subId: string): Promise<void> {
-  const path = `push_subscriptions/${subId}`;
   try {
-    await deleteDoc(doc(db, 'push_subscriptions', subId));
+    const res = await fetch('/api/unregister-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: subId })
+    });
+    if (!res.ok) {
+      throw new Error(`Server returned status ${res.status}`);
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, path);
+    console.warn('Server-side unregistration failed, falling back to direct Firestore delete:', error);
+    const path = `push_subscriptions/${subId}`;
+    try {
+      await deleteDoc(doc(db, 'push_subscriptions', subId));
+    } catch (fsError) {
+      handleFirestoreError(fsError, OperationType.DELETE, path);
+    }
   }
 }
 

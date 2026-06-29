@@ -509,14 +509,26 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
                       {getDeviceId()}
                     </code>
                   </div>
-                  <button
-                    type="button"
-                    onClick={fetchDebugData}
-                    disabled={isDebugLoading}
-                    className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
-                  >
-                    <span>🔄 {isDebugLoading ? 'Lädt...' : 'Aktualisieren'}</span>
-                  </button>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        requestPermission().then(() => fetchDebugData());
+                      }}
+                      disabled={isLoading}
+                      className="px-2 py-1 bg-orange-50 hover:bg-orange-100 text-[#FF6B00] border border-orange-200 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <span>⚡ {isLoading ? 'Registriert...' : 'Neu Registrieren'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={fetchDebugData}
+                      disabled={isDebugLoading}
+                      className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded text-[10px] font-bold flex items-center gap-1 transition cursor-pointer"
+                    >
+                      <span>🔄 {isDebugLoading ? 'Lädt...' : 'Aktualisieren'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Subscriptions List */}

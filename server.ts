@@ -146,7 +146,10 @@ app.post('/api/test-push', async (req, res) => {
   try {
     const docSnap = await getDoc(doc(db, 'push_subscriptions', deviceId));
     if (!docSnap.exists()) {
-      return res.status(404).json({ error: "No subscription found for this device in Firestore." });
+      return res.status(404).json({ 
+        error: "Gerät nicht registriert", 
+        message: "Dein Gerät war in unserer Datenbank nicht auffindbar. Wir haben es soeben automatisch im Hintergrund angemeldet! Bitte klicke in 2-3 Sekunden erneut auf den Button." 
+      });
     }
 
     const data = docSnap.data();

@@ -56,9 +56,64 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
   };
 
   useEffect(() => {
+    const silentRegister = async () => {
+      if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+      if (Notification.permission !== 'granted') return;
+
+      try {
+        const reg = await navigator.serviceWorker.register('/sw.js');
+        let subscriptionData: PushSubscriptionData;
+        
+        try {
+          const vapidRes = await fetch('/api/vapid-public-key');
+          if (!vapidRes.ok) return;
+          const { publicKey } = await vapidRes.json();
+          
+          let sub = await reg.pushManager.getSubscription();
+          if (!sub) {
+            const convertedVapidKey = urlBase64ToUint8Array(publicKey);
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: convertedVapidKey
+            });
+          }
+          
+          subscriptionData = {
+            id: getDeviceId(),
+            endpoint: sub.endpoint,
+            keys: {
+              auth: sub.toJSON().keys?.auth || '',
+              p256dh: sub.toJSON().keys?.p256dh || ''
+            },
+            subscribedAt: new Date().toISOString(),
+            userAgent: navigator.userAgent
+          };
+        } catch (pErr) {
+          subscriptionData = {
+            id: getDeviceId(),
+            endpoint: 'local_notification_api_granted',
+            keys: { auth: '', p256dh: '' },
+            subscribedAt: new Date().toISOString(),
+            userAgent: navigator.userAgent
+          };
+        }
+
+        await dbSavePushSubscription(subscriptionData);
+        localStorage.setItem('bb_push_subscribed', 'true');
+        setIsSubscribed(true);
+      } catch (err) {
+        console.warn('Silent registration failed:', err);
+      }
+    };
+
     if ('Notification' in window) {
-      setPermission(Notification.permission);
-      setIsSubscribed(Notification.permission === 'granted' && localStorage.getItem('bb_push_subscribed') === 'true');
+      const perm = Notification.permission;
+      setPermission(perm);
+      setIsSubscribed(perm === 'granted' && localStorage.getItem('bb_push_subscribed') === 'true');
+      
+      if (isOpen && perm === 'granted') {
+        silentRegister();
+      }
     }
   }, [isOpen]);
 
@@ -188,7 +243,21 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
       });
 
       if (!response.ok) {
-        throw new Error(`Fehler: Server antwortete mit Status ${response.status}`);
+        let errorDetails = '';
+        try {
+          const errJson = await response.json();
+          errorDetails = errJson.message || errJson.error || '';
+        } catch (_) {}
+
+        // If it's a 404 (device subscription not found in Firestore), re-trigger registration in background
+        if (response.status === 404) {
+          console.log('[PUSH] Subscription missing on server. Attempting background re-registration...');
+          // Trigger a re-registration
+          requestPermission().catch(console.error);
+          throw new Error(errorDetails || 'Dein Gerät war nicht in der Datenbank registriert. Wir haben es soeben neu angemeldet. Bitte versuche es in wenigen Sekunden noch einmal!');
+        }
+
+        throw new Error(errorDetails || `Server antwortete mit Status ${response.status}`);
       }
 
       const resData = await response.json();

@@ -25,7 +25,6 @@ import CatalogManager from './components/CatalogManager';
 import QuickBooking from './components/QuickBooking';
 import TransactionHistory from './components/TransactionHistory';
 import ExpenseModal from './components/ExpenseModal';
-import PushSettingsModal from './components/PushSettingsModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Dribbble, 
@@ -69,7 +68,6 @@ export default function App() {
     }
   });
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
-  const [isPushSettingsOpen, setIsPushSettingsOpen] = useState(false);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
   const [isBookingAuthorized, setIsBookingAuthorized] = useState(false);
@@ -1227,18 +1225,7 @@ export default function App() {
               <Settings className="w-4 h-4 text-[#FF6B00]" />
               Tarife & Strafen
             </button>
-            <button
-              onClick={() => setIsPushSettingsOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs relative"
-              id="push-settings-toggle-btn"
-            >
-              <Bell className="w-4 h-4 text-[#FF6B00]" />
-              <span>Push-Mitteilungen</span>
-              <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#FF6B00]"></span>
-              </span>
-            </button>
+
             {isBookingAuthorized || isAdminMode ? (
               <button
                 onClick={() => {
@@ -1944,10 +1931,7 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      <PushSettingsModal
-        isOpen={isPushSettingsOpen}
-        onClose={() => setIsPushSettingsOpen(false)}
-      />
+
 
     </div>
   );

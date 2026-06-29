@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Player, Drink, Fine, Transaction, ClubStats, Expense } from './types';
+import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
-import { onSnapshot, collection } from 'firebase/firestore';
+import { onSnapshot, collection, doc, setDoc, runTransaction } from 'firebase/firestore';
 import { db, initAuth } from './firebase';
 import { 
   isDatabaseEmpty, 
@@ -48,6 +48,58 @@ import {
   Volume2
 } from 'lucide-react';
 
+function calculateNextRunTime(schedule: NotificationSchedule): number | undefined {
+  if (!schedule.isActive) return undefined;
+  
+  if (schedule.type === 'once') {
+    if (!schedule.onceDateTime) return undefined;
+    const date = new Date(schedule.onceDateTime);
+    const ms = date.getTime();
+    return isNaN(ms) ? undefined : ms;
+  }
+  
+  if (schedule.type === 'repeating') {
+    if (!schedule.repeatingTime) return undefined;
+    const [hours, minutes] = schedule.repeatingTime.split(':').map(Number);
+    if (isNaN(hours) || hours < 0 || hours > 23 || isNaN(minutes) || minutes < 0 || minutes > 59) return undefined;
+    
+    const now = new Date();
+    const target = new Date();
+    target.setHours(hours, minutes, 0, 0);
+    
+    if (schedule.repeatingDay === 'daily') {
+      if (target.getTime() <= now.getTime()) {
+        target.setDate(target.getDate() + 1);
+      }
+      return target.getTime();
+    } else {
+      const dayMap: { [key: string]: number } = {
+        sunday: 0,
+        monday: 1,
+        tuesday: 2,
+        wednesday: 3,
+        thursday: 4,
+        friday: 5,
+        saturday: 6
+      };
+      const targetDay = dayMap[schedule.repeatingDay || 'sunday'];
+      const currentDay = now.getDay();
+      
+      let daysDiff = targetDay - currentDay;
+      if (daysDiff < 0) {
+        daysDiff += 7;
+      } else if (daysDiff === 0) {
+        if (target.getTime() <= now.getTime()) {
+          daysDiff = 7;
+        }
+      }
+      target.setDate(target.getDate() + daysDiff);
+      return target.getTime();
+    }
+  }
+  return undefined;
+}
+
 export default function App() {
   // --- STATE ---
   const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
@@ -88,6 +140,11 @@ export default function App() {
   const [importJson, setImportJson] = useState('');
   const [showBackupPanel, setShowBackupPanel] = useState(false);
   const [backupMessage, setBackupMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  // Notification Planner & Sendeplan State
+  const [isNotificationPlannerOpen, setIsNotificationPlannerOpen] = useState(false);
+  const [schedules, setSchedules] = useState<NotificationSchedule[]>([]);
+  const [notifStatus, setNotifStatus] = useState<{ text: string; isError: boolean } | null>(null);
 
   // Local browser notification state
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>(() => {
@@ -193,13 +250,14 @@ export default function App() {
     if (Notification.permission !== 'granted') return;
     if (notificationsMutedRef.current) return;
 
+    if (tx.type === 'drink') {
+      return; // Bei Eintragen von Getränken: Nie.
+    }
+
     let title = "Mannschaftskasse Update";
     let body = "";
 
-    if (tx.type === 'drink') {
-      title = `🍻 Getränk gebucht: ${tx.playerName}`;
-      body = `${tx.playerName} hat "${tx.itemName}" eingetragen (${tx.amount.toFixed(2)} €).`;
-    } else if (tx.type === 'fine') {
+    if (tx.type === 'fine') {
       title = `💸 Strafe erhalten: ${tx.playerName}`;
       body = `${tx.playerName} hat eine Strafe erhalten: "${tx.itemName}" (${tx.amount.toFixed(2)} €).`;
     } else if (tx.type === 'payment') {
@@ -222,6 +280,8 @@ export default function App() {
     let unsubFines: () => void;
     let unsubTransactions: () => void;
     let unsubExpenses: () => void;
+    let unsubSchedules: () => void;
+    let unsubAnnouncements: () => void;
 
     const setupSubscriptions = () => {
       unsubPlayers = onSnapshot(collection(db, 'players'), (snapshot) => {
@@ -287,6 +347,63 @@ export default function App() {
         setExpenses(expensesList);
       }, (err) => {
         console.error("Failed to load expenses: ", err);
+      });
+
+      unsubSchedules = onSnapshot(collection(db, 'schedules'), (snapshot) => {
+        const schedulesList: NotificationSchedule[] = [];
+        snapshot.forEach((doc) => {
+          schedulesList.push(doc.data() as NotificationSchedule);
+        });
+
+        if (schedulesList.length === 0) {
+          const defaultSchedules: NotificationSchedule[] = [
+            {
+              id: 'kontostand',
+              title: 'Aktueller Kontostand 📊',
+              defaultBody: 'Bitte überprüfe deinen Kontostand in der App und zahle ausstehende Beträge ein. Jede Kasse zählt!',
+              isActive: false,
+              type: 'once',
+              onceDateTime: '',
+              repeatingDay: 'sunday',
+              repeatingTime: '18:00'
+            },
+            {
+              id: 'getraenke',
+              title: 'Getränke nachtragen! 🍻',
+              defaultBody: 'Denkt bitte daran, alle eure konsumierten Getränke der letzten Tage ordnungsgemäß nachzutragen!',
+              isActive: false,
+              type: 'once',
+              onceDateTime: '',
+              repeatingDay: 'sunday',
+              repeatingTime: '18:00'
+            }
+          ];
+          defaultSchedules.forEach(schedule => {
+            setDoc(doc(db, 'schedules', schedule.id), schedule).catch(e => console.error("Failed to seed default schedule:", e));
+          });
+        } else {
+          setSchedules(schedulesList);
+        }
+      }, (err) => {
+        console.error("Failed to load schedules: ", err);
+      });
+
+      let isInitialAnnouncement = true;
+      unsubAnnouncements = onSnapshot(collection(db, 'announcements'), (snapshot) => {
+        if (isInitialAnnouncement) {
+          isInitialAnnouncement = false;
+          return;
+        }
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'added') {
+            const announcement = change.doc.data();
+            if (announcement && announcement.title && announcement.body) {
+              triggerNotificationWithSW(announcement.title, announcement.body);
+            }
+          }
+        });
+      }, (err) => {
+        console.error("Failed to load announcements: ", err);
       });
     };
 
@@ -388,6 +505,90 @@ export default function App() {
       if (unsubFines) unsubFines();
       if (unsubTransactions) unsubTransactions();
       if (unsubExpenses) unsubExpenses();
+      if (unsubSchedules) unsubSchedules();
+      if (unsubAnnouncements) unsubAnnouncements();
+    };
+  }, []);
+
+  const schedulesRef = useRef(schedules);
+  useEffect(() => {
+    schedulesRef.current = schedules;
+  }, [schedules]);
+
+  useEffect(() => {
+    const checkScheduledNotifications = async () => {
+      const now = Date.now();
+      const currentSchedules = schedulesRef.current;
+      if (!currentSchedules || currentSchedules.length === 0) return;
+      
+      for (const schedule of currentSchedules) {
+        if (!schedule.isActive) continue;
+        
+        let nextRun = schedule.nextRunTime;
+        if (!nextRun) {
+          nextRun = calculateNextRunTime(schedule);
+          if (nextRun) {
+            try {
+              await setDoc(doc(db, 'schedules', schedule.id), {
+                ...schedule,
+                nextRunTime: nextRun
+              });
+            } catch (err) {
+              console.error("Failed to update schedule nextRunTime: ", err);
+            }
+            continue;
+          }
+        }
+        
+        if (nextRun && nextRun <= now) {
+          try {
+            const scheduleDocRef = doc(db, 'schedules', schedule.id);
+            await runTransaction(db, async (transaction) => {
+              const freshDoc = await transaction.get(scheduleDocRef);
+              if (!freshDoc.exists()) return;
+              
+              const freshSchedule = freshDoc.data() as NotificationSchedule;
+              if (!freshSchedule.isActive) return;
+              if (freshSchedule.nextRunTime && freshSchedule.nextRunTime > Date.now()) return;
+              
+              const announcementRef = doc(collection(db, 'announcements'));
+              transaction.set(announcementRef, {
+                id: announcementRef.id,
+                title: freshSchedule.title,
+                body: freshSchedule.defaultBody,
+                timestamp: new Date().toISOString()
+              });
+              
+              let updatedSchedule = { ...freshSchedule };
+              updatedSchedule.lastTriggered = new Date().toISOString();
+              
+              if (freshSchedule.type === 'once') {
+                updatedSchedule.isActive = false;
+                updatedSchedule.nextRunTime = undefined;
+              } else {
+                const nextRunTime = calculateNextRunTime({
+                  ...freshSchedule,
+                  lastTriggered: updatedSchedule.lastTriggered
+                });
+                updatedSchedule.nextRunTime = nextRunTime;
+              }
+              
+              transaction.set(scheduleDocRef, updatedSchedule);
+            });
+            console.log(`Successfully triggered scheduled notification: ${schedule.id}`);
+          } catch (err) {
+            console.error("Transaction failed during scheduled trigger: ", err);
+          }
+        }
+      }
+    };
+
+    const interval = setInterval(checkScheduledNotifications, 15000);
+    const initialTimeout = setTimeout(checkScheduledNotifications, 2000);
+    
+    return () => {
+      clearInterval(interval);
+      clearTimeout(initialTimeout);
     };
   }, []);
 
@@ -937,6 +1138,41 @@ export default function App() {
     }
   };
 
+  const handleSendNow = async (id: string, title: string, body: string) => {
+    try {
+      const announcementRef = doc(collection(db, 'announcements'));
+      await setDoc(announcementRef, {
+        id: announcementRef.id,
+        title: title,
+        body: body,
+        timestamp: new Date().toISOString()
+      });
+      setNotifStatus({ text: `📣 Meldung "${title}" wurde erfolgreich an alle gesendet!`, isError: false });
+      setTimeout(() => setNotifStatus(null), 4000);
+    } catch (err) {
+      console.error("Failed to send manual announcement:", err);
+      setNotifStatus({ text: "Fehler beim Senden der Meldung.", isError: true });
+      setTimeout(() => setNotifStatus(null), 4000);
+    }
+  };
+
+  const handleSaveSchedule = async (schedule: NotificationSchedule) => {
+    try {
+      const nextRun = calculateNextRunTime(schedule);
+      const updated = {
+        ...schedule,
+        nextRunTime: nextRun || null
+      };
+      await setDoc(doc(db, 'schedules', schedule.id), updated);
+      setNotifStatus({ text: `💾 Sendeplan für "${schedule.id === 'kontostand' ? 'Kontostand' : 'Getränke nachtragen'}" erfolgreich gespeichert!`, isError: false });
+      setTimeout(() => setNotifStatus(null), 4000);
+    } catch (err) {
+      console.error("Failed to save schedule:", err);
+      setNotifStatus({ text: "Fehler beim Speichern des Sendeplans.", isError: true });
+      setTimeout(() => setNotifStatus(null), 4000);
+    }
+  };
+
   const handleAdminPromptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const pin = adminPromptPin;
@@ -1252,7 +1488,15 @@ export default function App() {
               id="catalog-manager-toggle-btn"
             >
               <Settings className="w-4 h-4 text-[#FF6B00]" />
-              Tarife & Strafen
+              Getränke und Strafenkatalog
+            </button>
+            <button
+              onClick={() => setIsNotificationPlannerOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+              id="notification-planner-toggle-btn"
+            >
+              <Bell className="w-4 h-4 text-[#FF6B00]" />
+              Meldungen & Sendepläne
             </button>
 
             {typeof window !== 'undefined' && 'Notification' in window && (
@@ -1881,7 +2125,7 @@ export default function App() {
             <div className="flex justify-between items-center border-b border-slate-100 pb-3 shrink-0">
               <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
                 <Settings className="w-5 h-5 text-[#FF6B00]" />
-                Tarife & Strafen verwalten
+                Getränke- und Strafenkatalog verwalten
               </h3>
               <button
                 onClick={() => setIsCatalogOpen(false)}
@@ -1927,6 +2171,440 @@ export default function App() {
                     <h4 className="font-bold text-slate-800">🔒 Admin-Bereich: Katalog verwalten</h4>
                     <p className="text-xs text-slate-500 mt-1">
                       Der Getränke- und Strafenkatalog ist aktuell für Mitglieder gesperrt. Gib den Admin-PIN ein, um Einstellungen vorzunehmen.
+                    </p>
+                  </div>
+                  
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      if (bottomPinInput === '2016') {
+                        setIsAdminMode(true);
+                        setBottomPinInput('');
+                        setBottomPinError('');
+                      } else {
+                        setBottomPinError('Falscher PIN!');
+                      }
+                    }}
+                    className="space-y-3 max-w-sm mx-auto pt-2"
+                  >
+                    <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                      <input
+                        type="password"
+                        placeholder="Admin-PIN eingeben"
+                        value={bottomPinInput}
+                        onChange={(e) => setBottomPinInput(e.target.value)}
+                        className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-[#FF6B00] shadow-2xs font-mono text-center flex-1"
+                      />
+                      <button
+                        type="submit"
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm shrink-0"
+                      >
+                        Freischalten
+                      </button>
+                    </div>
+                    {bottomPinError && (
+                      <p className="text-[10px] text-rose-600 font-semibold animate-fade-in">{bottomPinError}</p>
+                    )}
+                  </form>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Notification Planner & Sendepläne */}
+      {isNotificationPlannerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" id="notification-planner-modal">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3 shrink-0">
+              <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <Bell className="w-5 h-5 text-[#FF6B00]" />
+                Meldungen &amp; Sendepläne verwalten
+              </h3>
+              <button
+                onClick={() => setIsNotificationPlannerOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Status Feedback Notice */}
+            {notifStatus && (
+              <div className={`p-4 rounded-2xl text-xs font-bold transition-all animate-fade-in ${notifStatus.isError ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                {notifStatus.text}
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto pr-1">
+              {isAdminMode ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  {/* Card 1: Kontostand */}
+                  {(() => {
+                    const sched = schedules.find(s => s.id === 'kontostand') || {
+                      id: 'kontostand',
+                      title: 'Aktueller Kontostand 📊',
+                      defaultBody: 'Bitte überprüfe deinen Kontostand in der App und zahle ausstehende Beträge ein. Jede Kasse zählt!',
+                      isActive: false,
+                      type: 'once',
+                      onceDateTime: '',
+                      repeatingDay: 'sunday',
+                      repeatingTime: '18:00'
+                    };
+                    
+                    return (
+                      <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4 shadow-3xs hover:shadow-2xs transition flex flex-col justify-between">
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="font-black text-slate-800 text-sm">1. Kontostand-Erinnerung</h4>
+                              <p className="text-[11px] text-slate-400">Erinnert Spieler an ihren offenen Saldo</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                checked={sched.isActive} 
+                                onChange={(e) => {
+                                  const updated = { ...sched, isActive: e.target.checked };
+                                  handleSaveSchedule(updated);
+                                }}
+                                className="sr-only peer" 
+                              />
+                              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                              <span className="ml-2 text-[10px] font-bold text-slate-500">{sched.isActive ? 'Aktiv' : 'Inaktiv'}</span>
+                            </label>
+                          </div>
+
+                          {/* Message Editor */}
+                          <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Betreff / Titel</label>
+                            <input 
+                              type="text" 
+                              value={sched.title} 
+                              onChange={(e) => {
+                                const updated = { ...sched, title: e.target.value };
+                                setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]" 
+                            />
+
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">Meldungstext</label>
+                            <textarea 
+                              value={sched.defaultBody} 
+                              rows={3}
+                              onChange={(e) => {
+                                const updated = { ...sched, defaultBody: e.target.value };
+                                setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] resize-none" 
+                            />
+                          </div>
+
+                          {/* Schedule Planner */}
+                          <div className="space-y-3 p-3.5 border border-slate-100 rounded-xl bg-white">
+                            <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                              <Settings className="w-3.5 h-3.5 text-[#FF6B00]" />
+                              Sendeplan konfigurieren
+                            </h5>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = { ...sched, type: 'once' as const };
+                                  setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'once' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                              >
+                                Einmalig
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = { ...sched, type: 'repeating' as const };
+                                  setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'repeating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                              >
+                                Wiederholend
+                              </button>
+                            </div>
+
+                            {sched.type === 'once' ? (
+                              <div className="space-y-1">
+                                <label className="block text-[10px] font-bold text-slate-400">Datum &amp; Uhrzeit</label>
+                                <input 
+                                  type="datetime-local" 
+                                  value={sched.onceDateTime || ''}
+                                  onChange={(e) => {
+                                    const updated = { ...sched, onceDateTime: e.target.value };
+                                    setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                                  }}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                />
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-1">
+                                  <label className="block text-[10px] font-bold text-slate-400">Wochentag</label>
+                                  <select
+                                    value={sched.repeatingDay || 'sunday'}
+                                    onChange={(e) => {
+                                      const updated = { ...sched, repeatingDay: e.target.value as any };
+                                      setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                                    }}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"
+                                  >
+                                    <option value="daily">Täglich</option>
+                                    <option value="monday">Montag</option>
+                                    <option value="tuesday">Dienstag</option>
+                                    <option value="wednesday">Mittwoch</option>
+                                    <option value="thursday">Donnerstag</option>
+                                    <option value="friday">Freitag</option>
+                                    <option value="saturday">Samstag</option>
+                                    <option value="sunday">Sonntag</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="block text-[10px] font-bold text-slate-400">Uhrzeit</label>
+                                  <input 
+                                    type="time" 
+                                    value={sched.repeatingTime || '18:00'}
+                                    onChange={(e) => {
+                                      const updated = { ...sched, repeatingTime: e.target.value };
+                                      setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
+                                    }}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Info metrics */}
+                            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[10px] text-slate-500 font-medium">
+                              <div>
+                                <span className="block text-[9px] text-slate-400 uppercase">Letzter Versand:</span>
+                                <span className="font-mono">{sched.lastTriggered ? new Date(sched.lastTriggered).toLocaleString('de-DE') : 'Nie'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[9px] text-slate-400 uppercase">Nächster Lauf:</span>
+                                <span className="font-bold text-emerald-600 font-mono">
+                                  {sched.isActive && sched.nextRunTime ? new Date(sched.nextRunTime).toLocaleString('de-DE') : 'Nicht geplant'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2 pt-4 border-t border-slate-100 mt-4">
+                          <button
+                            type="button"
+                            onClick={() => handleSendNow('kontostand', sched.title, sched.defaultBody)}
+                            className="flex-1 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl text-xs transition cursor-pointer text-center"
+                          >
+                            Jetzt senden 📣
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveSchedule(sched)}
+                            className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center"
+                          >
+                            Plan speichern 💾
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Card 2: Getränke nachtragen */}
+                  {(() => {
+                    const sched = schedules.find(s => s.id === 'getraenke') || {
+                      id: 'getraenke',
+                      title: 'Getränke nachtragen! 🍻',
+                      defaultBody: 'Denkt bitte daran, alle eure konsumierten Getränke der letzten Tage ordnungsgemäß nachzutragen!',
+                      isActive: false,
+                      type: 'once',
+                      onceDateTime: '',
+                      repeatingDay: 'sunday',
+                      repeatingTime: '18:00'
+                    };
+                    
+                    return (
+                      <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4 shadow-3xs hover:shadow-2xs transition flex flex-col justify-between">
+                        <div className="space-y-4">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="font-black text-slate-800 text-sm">2. Getränke-Nachzutragen-Erinnerung</h4>
+                              <p className="text-[11px] text-slate-400">Erinnert Spieler an Getränkeeintragung</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input 
+                                type="checkbox" 
+                                checked={sched.isActive} 
+                                onChange={(e) => {
+                                  const updated = { ...sched, isActive: e.target.checked };
+                                  handleSaveSchedule(updated);
+                                }}
+                                className="sr-only peer" 
+                              />
+                              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                              <span className="ml-2 text-[10px] font-bold text-slate-500">{sched.isActive ? 'Aktiv' : 'Inaktiv'}</span>
+                            </label>
+                          </div>
+
+                          {/* Message Editor */}
+                          <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Betreff / Titel</label>
+                            <input 
+                              type="text" 
+                              value={sched.title} 
+                              onChange={(e) => {
+                                const updated = { ...sched, title: e.target.value };
+                                setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]" 
+                            />
+
+                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">Meldungstext</label>
+                            <textarea 
+                              value={sched.defaultBody} 
+                              rows={3}
+                              onChange={(e) => {
+                                const updated = { ...sched, defaultBody: e.target.value };
+                                setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                              }}
+                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] resize-none" 
+                            />
+                          </div>
+
+                          {/* Schedule Planner */}
+                          <div className="space-y-3 p-3.5 border border-slate-100 rounded-xl bg-white">
+                            <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                              <Settings className="w-3.5 h-3.5 text-[#FF6B00]" />
+                              Sendeplan konfigurieren
+                            </h5>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = { ...sched, type: 'once' as const };
+                                  setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'once' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                              >
+                                Einmalig
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = { ...sched, type: 'repeating' as const };
+                                  setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                                }}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'repeating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                              >
+                                Wiederholend
+                              </button>
+                            </div>
+
+                            {sched.type === 'once' ? (
+                              <div className="space-y-1">
+                                <label className="block text-[10px] font-bold text-slate-400">Datum &amp; Uhrzeit</label>
+                                <input 
+                                  type="datetime-local" 
+                                  value={sched.onceDateTime || ''}
+                                  onChange={(e) => {
+                                    const updated = { ...sched, onceDateTime: e.target.value };
+                                    setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                                  }}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                />
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-1">
+                                  <label className="block text-[10px] font-bold text-slate-400">Wochentag</label>
+                                  <select
+                                    value={sched.repeatingDay || 'sunday'}
+                                    onChange={(e) => {
+                                      const updated = { ...sched, repeatingDay: e.target.value as any };
+                                      setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                                    }}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"
+                                  >
+                                    <option value="daily">Täglich</option>
+                                    <option value="monday">Montag</option>
+                                    <option value="tuesday">Dienstag</option>
+                                    <option value="wednesday">Mittwoch</option>
+                                    <option value="thursday">Donnerstag</option>
+                                    <option value="friday">Freitag</option>
+                                    <option value="saturday">Samstag</option>
+                                    <option value="sunday">Sonntag</option>
+                                  </select>
+                                </div>
+                                <div className="space-y-1">
+                                  <label className="block text-[10px] font-bold text-slate-400">Uhrzeit</label>
+                                  <input 
+                                    type="time" 
+                                    value={sched.repeatingTime || '18:00'}
+                                    onChange={(e) => {
+                                      const updated = { ...sched, repeatingTime: e.target.value };
+                                      setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
+                                    }}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Info metrics */}
+                            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[10px] text-slate-500 font-medium">
+                              <div>
+                                <span className="block text-[9px] text-slate-400 uppercase">Letzter Versand:</span>
+                                <span className="font-mono">{sched.lastTriggered ? new Date(sched.lastTriggered).toLocaleString('de-DE') : 'Nie'}</span>
+                              </div>
+                              <div>
+                                <span className="block text-[9px] text-slate-400 uppercase">Nächster Lauf:</span>
+                                <span className="font-bold text-emerald-600 font-mono">
+                                  {sched.isActive && sched.nextRunTime ? new Date(sched.nextRunTime).toLocaleString('de-DE') : 'Nicht geplant'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2 pt-4 border-t border-slate-100 mt-4">
+                          <button
+                            type="button"
+                            onClick={() => handleSendNow('getraenke', sched.title, sched.defaultBody)}
+                            className="flex-1 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl text-xs transition cursor-pointer text-center"
+                          >
+                            Jetzt senden 📣
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveSchedule(sched)}
+                            className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center"
+                          >
+                            Plan speichern 💾
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <div className="bg-slate-50 border border-slate-200 rounded-3xl p-8 text-center max-w-xl mx-auto space-y-4 shadow-3xs my-8 animate-fade-in">
+                  <div className="w-12 h-12 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl flex items-center justify-center mx-auto animate-pulse">
+                    <Lock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800">🔒 Admin-Bereich: Meldungen &amp; Sendepläne</h4>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Meldungen und Sendepläne können nur von Administratoren konfiguriert werden. Gib den Admin-PIN ein, um fortzufahren.
                     </p>
                   </div>
                   

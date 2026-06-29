@@ -115,10 +115,10 @@ export default function CatalogManager({
         <div>
           <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
             <Beer className="text-[#FF6B00] w-5 h-5" />
-            Tarife &amp; Strafen verwalten
+            Getränke &amp; Strafenkatalog verwalten
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Hier kannst du Getränkepreise und den offiziellen Strafenkatalog anpassen.
+            Hier kannst du Getränkepreise und den offiziellen Strafenkatalog der Mannschaft anpassen.
           </p>
         </div>
 

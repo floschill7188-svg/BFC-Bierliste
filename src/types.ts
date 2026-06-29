@@ -77,4 +77,17 @@ export interface PushSubscriptionData {
   userAgent: string;
 }
 
+export interface NotificationSchedule {
+  id: string; // 'kontostand' or 'getraenke'
+  title: string;
+  defaultBody: string;
+  isActive: boolean;
+  type: 'once' | 'repeating';
+  onceDateTime?: string; // "YYYY-MM-DDTHH:MM"
+  repeatingDay?: 'daily' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+  repeatingTime?: string; // "HH:MM"
+  lastTriggered?: string; // ISO string of last trigger
+  nextRunTime?: number; // millisecond timestamp of next run
+}
+
 

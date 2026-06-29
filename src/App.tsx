@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
-import { onSnapshot, collection, doc, setDoc, runTransaction } from 'firebase/firestore';
+import { onSnapshot, collection, doc, setDoc, runTransaction, deleteDoc } from 'firebase/firestore';
 import { db, initAuth } from './firebase';
 import { 
   isDatabaseEmpty, 
@@ -45,7 +45,8 @@ import {
   Unlock,
   Bell,
   BellOff,
-  Volume2
+  Volume2,
+  Trash2
 } from 'lucide-react';
 
 function calculateNextRunTime(schedule: NotificationSchedule): number | undefined {
@@ -1246,11 +1247,48 @@ export default function App() {
         nextRunTime: nextRun || null
       };
       await setDoc(doc(db, 'schedules', schedule.id), updated);
-      setNotifStatus({ text: `💾 Sendeplan für "${schedule.id === 'kontostand' ? 'Kontostand' : 'Getränke nachtragen'}" erfolgreich gespeichert!`, isError: false });
+      setNotifStatus({ text: `💾 Sendeplan für "${schedule.title}" erfolgreich gespeichert!`, isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
       console.error("Failed to save schedule:", err);
       setNotifStatus({ text: "Fehler beim Speichern des Sendeplans.", isError: true });
+      setTimeout(() => setNotifStatus(null), 4000);
+    }
+  };
+
+  const handleAddSchedule = async () => {
+    try {
+      const newId = doc(collection(db, 'schedules')).id;
+      const newSchedule: NotificationSchedule = {
+        id: newId,
+        title: 'Neue Erinnerung 📣',
+        defaultBody: 'Bitte denkt daran, eure ausstehenden Beträge einzuzahlen oder eure Getränke einzutragen.',
+        isActive: false,
+        type: 'repeating',
+        repeatingDay: 'sunday',
+        repeatingTime: '18:00',
+        onceDateTime: '',
+        history: []
+      };
+      await setDoc(doc(db, 'schedules', newId), newSchedule);
+      setNotifStatus({ text: "✨ Neuer Sendeplan wurde erfolgreich angelegt!", isError: false });
+      setTimeout(() => setNotifStatus(null), 4000);
+    } catch (err) {
+      console.error("Failed to add schedule:", err);
+      setNotifStatus({ text: "Fehler beim Erstellen des Sendeplans.", isError: true });
+      setTimeout(() => setNotifStatus(null), 4000);
+    }
+  };
+
+  const handleDeleteSchedule = async (id: string) => {
+    if (!window.confirm("Bist du sicher, dass du diesen Sendeplan löschen möchtest?")) return;
+    try {
+      await deleteDoc(doc(db, 'schedules', id));
+      setNotifStatus({ text: "🗑️ Sendeplan wurde erfolgreich gelöscht!", isError: false });
+      setTimeout(() => setNotifStatus(null), 4000);
+    } catch (err) {
+      console.error("Failed to delete schedule:", err);
+      setNotifStatus({ text: "Fehler beim Löschen des Sendeplans.", isError: true });
       setTimeout(() => setNotifStatus(null), 4000);
     }
   };
@@ -1556,30 +1594,34 @@ export default function App() {
 
           {/* Actions & Utilities in Header */}
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setShowBackupPanel(!showBackupPanel)}
-              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
-              id="backup-panel-toggle-btn"
-            >
-              <Layers className="w-4 h-4 text-[#FF6B00]" />
-              Backup / Export
-            </button>
-            <button
-              onClick={() => setIsCatalogOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
-              id="catalog-manager-toggle-btn"
-            >
-              <Settings className="w-4 h-4 text-[#FF6B00]" />
-              Getränke und Strafenkatalog
-            </button>
-            <button
-              onClick={() => setIsNotificationPlannerOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
-              id="notification-planner-toggle-btn"
-            >
-              <Bell className="w-4 h-4 text-[#FF6B00]" />
-              Meldungen & Sendepläne
-            </button>
+            {isAdminMode && (
+              <>
+                <button
+                  onClick={() => setShowBackupPanel(!showBackupPanel)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  id="backup-panel-toggle-btn"
+                >
+                  <Layers className="w-4 h-4 text-[#FF6B00]" />
+                  Backup / Export
+                </button>
+                <button
+                  onClick={() => setIsCatalogOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  id="catalog-manager-toggle-btn"
+                >
+                  <Settings className="w-4 h-4 text-[#FF6B00]" />
+                  Getränke und Strafenkatalog
+                </button>
+                <button
+                  onClick={() => setIsNotificationPlannerOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  id="notification-planner-toggle-btn"
+                >
+                  <Bell className="w-4 h-4 text-[#FF6B00]" />
+                  Meldungen & Sendepläne
+                </button>
+              </>
+            )}
 
             {typeof window !== 'undefined' && 'Notification' in window && (
               <button
@@ -1635,6 +1677,7 @@ export default function App() {
                 onClick={() => {
                   setIsBookingAuthorized(false);
                   setIsAdminMode(false);
+                  setShowBackupPanel(false);
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-lock-btn"
@@ -1658,22 +1701,19 @@ export default function App() {
                 <span>Gesperrt</span>
               </button>
             )}
-            <button
-              onClick={() => {
-                if (isAdminMode) {
+
+            {isAdminMode && (
+              <button
+                onClick={() => {
                   setIsNewPlayerModalOpen(true);
-                } else {
-                  setPendingAdminAction({ type: 'add_player' });
-                  setAdminPromptPin('');
-                  setAdminPromptError('');
-                }
-              }}
-              className="flex items-center gap-2 px-4 py-2.5 bg-[#FF6B00] hover:bg-orange-500 text-white hover:scale-[1.02] font-black rounded-xl text-xs transition transform active:scale-95 cursor-pointer shadow-xs"
-              id="add-player-btn"
-            >
-              <Plus className="w-4 h-4" />
-              Spieler hinzufügen
-            </button>
+                }}
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#FF6B00] hover:bg-orange-500 text-white hover:scale-[1.02] font-black rounded-xl text-xs transition transform active:scale-95 cursor-pointer shadow-xs animate-fade-in"
+                id="add-player-btn"
+              >
+                <Plus className="w-4 h-4" />
+                Spieler hinzufügen
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -2321,8 +2361,276 @@ export default function App() {
 
             <div className="flex-1 overflow-y-auto pr-1">
               {isAdminMode ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                  {/* Card 1: Kontostand */}
+                <>
+                  <div className="space-y-6">
+                    {/* Header of Sendepläne list */}
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-100">
+                      <div>
+                        <h4 className="font-bold text-slate-800 text-sm">Aktive Sendepläne ({schedules.length})</h4>
+                        <p className="text-[11px] text-slate-400">Erstelle beliebig viele einmalige oder wiederholende Sendepläne, die parallel laufen.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddSchedule}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-[#FF6B00] to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-xs active:scale-95 shrink-0"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Sendeplan hinzufügen
+                      </button>
+                    </div>
+
+                    {schedules.length === 0 ? (
+                      <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                        <BellOff className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="text-xs text-slate-500 font-medium">Bisher wurden keine Sendepläne erstellt.</p>
+                        <button
+                          type="button"
+                          onClick={handleAddSchedule}
+                          className="mt-3 text-xs text-[#FF6B00] font-bold hover:underline"
+                        >
+                          Jetzt den ersten Sendeplan anlegen
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                        {schedules.map((sched) => {
+                          return (
+                            <div key={sched.id} className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4 shadow-3xs hover:shadow-2xs transition flex flex-col justify-between">
+                              <div className="space-y-4">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex-1 min-w-0 pr-2">
+                                    <input
+                                      type="text"
+                                      value={sched.title}
+                                      onChange={(e) => {
+                                        const updated = { ...sched, title: e.target.value };
+                                        setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                      }}
+                                      className="font-black text-slate-800 text-sm bg-transparent border-b border-transparent hover:border-slate-300 focus:border-[#FF6B00] focus:outline-none w-full pb-0.5"
+                                      placeholder="Sendeplan Titel..."
+                                    />
+                                    <p className="text-[11px] text-slate-400 mt-0.5">Sendeplan-ID: {sched.id}</p>
+                                  </div>
+                                  <div className="flex items-center gap-3 shrink-0">
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                      <input 
+                                        type="checkbox" 
+                                        checked={sched.isActive} 
+                                        onChange={(e) => {
+                                          const updated = { ...sched, isActive: e.target.checked };
+                                          handleSaveSchedule(updated);
+                                        }}
+                                        className="sr-only peer" 
+                                      />
+                                      <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                                      <span className="ml-2 text-[10px] font-bold text-slate-500">{sched.isActive ? 'Aktiv' : 'Inaktiv'}</span>
+                                    </label>
+                                  </div>
+                                </div>
+
+                                {/* Message Editor */}
+                                <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Betreff / Titel</label>
+                                  <input 
+                                    type="text" 
+                                    value={sched.title} 
+                                    onChange={(e) => {
+                                      const updated = { ...sched, title: e.target.value };
+                                      setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]" 
+                                  />
+
+                                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">Meldungstext</label>
+                                  <textarea 
+                                    value={sched.defaultBody} 
+                                    rows={3}
+                                    onChange={(e) => {
+                                      const updated = { ...sched, defaultBody: e.target.value };
+                                      setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                    }}
+                                    className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] resize-none" 
+                                  />
+                                </div>
+
+                                {/* Schedule Planner */}
+                                <div className="space-y-3 p-3.5 border border-slate-100 rounded-xl bg-white">
+                                  <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                                    <Settings className="w-3.5 h-3.5 text-[#FF6B00]" />
+                                    Sendeplan konfigurieren
+                                  </h5>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = { ...sched, type: 'once' as const };
+                                        setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                      }}
+                                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'once' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                                    >
+                                      Einmalig
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const updated = { ...sched, type: 'repeating' as const };
+                                        setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                      }}
+                                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'repeating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                                    >
+                                      Wiederholend
+                                    </button>
+                                  </div>
+
+                                  {sched.type === 'once' ? (
+                                    <div className="space-y-1">
+                                      <label className="block text-[10px] font-bold text-slate-400">Datum &amp; Uhrzeit</label>
+                                      <input 
+                                        type="datetime-local" 
+                                        value={sched.onceDateTime || ''}
+                                        onChange={(e) => {
+                                          const updated = { ...sched, onceDateTime: e.target.value };
+                                          setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                        }}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div className="space-y-1">
+                                        <label className="block text-[10px] font-bold text-slate-400">Wochentag</label>
+                                        <select
+                                          value={sched.repeatingDay || 'sunday'}
+                                          onChange={(e) => {
+                                            const updated = { ...sched, repeatingDay: e.target.value as any };
+                                            setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                          }}
+                                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"
+                                        >
+                                          <option value="daily">Täglich</option>
+                                          <option value="monday">Montag</option>
+                                          <option value="tuesday">Dienstag</option>
+                                          <option value="wednesday">Mittwoch</option>
+                                          <option value="thursday">Donnerstag</option>
+                                          <option value="friday">Freitag</option>
+                                          <option value="saturday">Samstag</option>
+                                          <option value="sunday">Sonntag</option>
+                                        </select>
+                                      </div>
+                                      <div className="space-y-1">
+                                        <label className="block text-[10px] font-bold text-slate-400">Uhrzeit</label>
+                                        <input 
+                                          type="time" 
+                                          value={sched.repeatingTime || '18:00'}
+                                          onChange={(e) => {
+                                            const updated = { ...sched, repeatingTime: e.target.value };
+                                            setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
+                                          }}
+                                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                          required
+                                        />
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Tabular History & Next Runs */}
+                                <div className="pt-3 border-t border-slate-100 space-y-3">
+                                  <div className="grid grid-cols-2 gap-4">
+                                    {/* Letzte 3 Läufe */}
+                                    <div className="space-y-1.5">
+                                      <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Letzte 3 Läufe</span>
+                                      <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+                                        <table className="w-full text-[10px]">
+                                          <tbody>
+                                            {(() => {
+                                              const hist = sched.history || (sched.lastTriggered ? [sched.lastTriggered] : []);
+                                              if (hist.length === 0) {
+                                                return (
+                                                  <tr>
+                                                    <td className="px-2 py-1.5 text-slate-400 italic text-center">Bisher keine Läufe</td>
+                                                  </tr>
+                                                );
+                                              }
+                                              return hist.map((timeStr, idx) => (
+                                                <tr key={idx} className={idx < hist.length - 1 ? "border-b border-slate-100" : ""}>
+                                                  <td className="px-2.5 py-1.5 font-mono text-slate-600 text-left">
+                                                    {idx + 1}. {new Date(timeStr).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                                                  </td>
+                                                </tr>
+                                              ));
+                                            })()}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+
+                                    {/* Nächste 3 Versandläufe */}
+                                    <div className="space-y-1.5">
+                                      <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Nächste 3 Läufe</span>
+                                      <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+                                        <table className="w-full text-[10px]">
+                                          <tbody>
+                                            {(() => {
+                                              const nextRuns = calculateNextNRunTimes(sched, 3);
+                                              if (nextRuns.length === 0) {
+                                                return (
+                                                  <tr>
+                                                    <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht active / geplant</td>
+                                                  </tr>
+                                                );
+                                              }
+                                              return nextRuns.map((timestamp, idx) => (
+                                                <tr key={idx} className={idx < nextRuns.length - 1 ? "border-b border-slate-100" : ""}>
+                                                  <td className="px-2.5 py-1.5 font-mono text-emerald-600 font-bold text-left">
+                                                    {idx + 1}. {new Date(timestamp).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                                                  </td>
+                                                </tr>
+                                              ));
+                                            })()}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Actions */}
+                              <div className="flex gap-2 pt-4 border-t border-slate-100 mt-4">
+                                <button
+                                  type="button"
+                                  onClick={() => handleSendNow(sched.id, sched.title, sched.defaultBody)}
+                                  className="flex-1 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl text-xs transition cursor-pointer text-center"
+                                >
+                                  Jetzt senden 📣
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleSaveSchedule(sched)}
+                                  className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center"
+                                >
+                                  Speichern 💾
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteSchedule(sched.id)}
+                                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs transition cursor-pointer text-center flex items-center justify-center"
+                                  title="Löschen"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  {false && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                      {/* Card 1: Kontostand */}
                   {(() => {
                     const sched = schedules.find(s => s.id === 'kontostand') || {
                       id: 'kontostand',
@@ -2772,6 +3080,8 @@ export default function App() {
                     );
                   })()}
                 </div>
+                )}
+                </>
               ) : (
                 <div className="bg-slate-50 border border-slate-200 rounded-3xl p-8 text-center max-w-xl mx-auto space-y-4 shadow-3xs my-8 animate-fade-in">
                   <div className="w-12 h-12 bg-amber-50 border border-amber-200 text-amber-600 rounded-2xl flex items-center justify-center mx-auto animate-pulse">

@@ -100,6 +100,69 @@ function calculateNextRunTime(schedule: NotificationSchedule): number | undefine
   return undefined;
 }
 
+function calculateNextNRunTimes(schedule: NotificationSchedule, n: number): number[] {
+  if (!schedule.isActive) return [];
+  
+  if (schedule.type === 'once') {
+    if (!schedule.onceDateTime) return [];
+    const date = new Date(schedule.onceDateTime);
+    const ms = date.getTime();
+    if (isNaN(ms)) return [];
+    return ms > Date.now() ? [ms] : [];
+  }
+  
+  if (schedule.type === 'repeating') {
+    if (!schedule.repeatingTime) return [];
+    const [hours, minutes] = schedule.repeatingTime.split(':').map(Number);
+    if (isNaN(hours) || hours < 0 || hours > 23 || isNaN(minutes) || minutes < 0 || minutes > 59) return [];
+    
+    const runs: number[] = [];
+    let referenceTime = Date.now();
+    
+    for (let i = 0; i < n; i++) {
+      const refDate = new Date(referenceTime);
+      const target = new Date(referenceTime);
+      target.setHours(hours, minutes, 0, 0);
+      
+      if (schedule.repeatingDay === 'daily') {
+        if (target.getTime() <= refDate.getTime()) {
+          target.setDate(target.getDate() + 1);
+        }
+        const runTime = target.getTime();
+        runs.push(runTime);
+        referenceTime = runTime + 1000;
+      } else {
+        const dayMap: { [key: string]: number } = {
+          sunday: 0,
+          monday: 1,
+          tuesday: 2,
+          wednesday: 3,
+          thursday: 4,
+          friday: 5,
+          saturday: 6
+        };
+        const targetDay = dayMap[schedule.repeatingDay || 'sunday'];
+        const currentDay = refDate.getDay();
+        
+        let daysDiff = targetDay - currentDay;
+        if (daysDiff < 0) {
+          daysDiff += 7;
+        } else if (daysDiff === 0) {
+          if (target.getTime() <= refDate.getTime()) {
+            daysDiff = 7;
+          }
+        }
+        target.setDate(target.getDate() + daysDiff);
+        const runTime = target.getTime();
+        runs.push(runTime);
+        referenceTime = runTime + 1000;
+      }
+    }
+    return runs;
+  }
+  return [];
+}
+
 export default function App() {
   // --- STATE ---
   const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
@@ -552,15 +615,19 @@ export default function App() {
               if (freshSchedule.nextRunTime && freshSchedule.nextRunTime > Date.now()) return;
               
               const announcementRef = doc(collection(db, 'announcements'));
+              const timestamp = new Date().toISOString();
               transaction.set(announcementRef, {
                 id: announcementRef.id,
                 title: freshSchedule.title,
                 body: freshSchedule.defaultBody,
-                timestamp: new Date().toISOString()
+                timestamp: timestamp
               });
               
               let updatedSchedule = { ...freshSchedule };
-              updatedSchedule.lastTriggered = new Date().toISOString();
+              updatedSchedule.lastTriggered = timestamp;
+              
+              const currentHistory = freshSchedule.history || [];
+              updatedSchedule.history = [timestamp, ...currentHistory].slice(0, 3);
               
               if (freshSchedule.type === 'once') {
                 updatedSchedule.isActive = false;
@@ -1141,12 +1208,27 @@ export default function App() {
   const handleSendNow = async (id: string, title: string, body: string) => {
     try {
       const announcementRef = doc(collection(db, 'announcements'));
+      const timestamp = new Date().toISOString();
       await setDoc(announcementRef, {
         id: announcementRef.id,
         title: title,
         body: body,
-        timestamp: new Date().toISOString()
+        timestamp: timestamp
       });
+
+      // Update schedule history & lastTriggered in Firestore
+      const sched = schedules.find(s => s.id === id);
+      if (sched) {
+        const history = sched.history || [];
+        const updatedHistory = [timestamp, ...history].slice(0, 3);
+        const updatedSched = {
+          ...sched,
+          lastTriggered: timestamp,
+          history: updatedHistory
+        };
+        await setDoc(doc(db, 'schedules', id), updatedSched);
+      }
+
       setNotifStatus({ text: `📣 Meldung "${title}" wurde erfolgreich an alle gesendet!`, isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
@@ -2381,17 +2463,64 @@ export default function App() {
                               </div>
                             )}
 
-                            {/* Info metrics */}
-                            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[10px] text-slate-500 font-medium">
-                              <div>
-                                <span className="block text-[9px] text-slate-400 uppercase">Letzter Versand:</span>
-                                <span className="font-mono">{sched.lastTriggered ? new Date(sched.lastTriggered).toLocaleString('de-DE') : 'Nie'}</span>
-                              </div>
-                              <div>
-                                <span className="block text-[9px] text-slate-400 uppercase">Nächster Lauf:</span>
-                                <span className="font-bold text-emerald-600 font-mono">
-                                  {sched.isActive && sched.nextRunTime ? new Date(sched.nextRunTime).toLocaleString('de-DE') : 'Nicht geplant'}
-                                </span>
+                            {/* Tabular History & Next Runs */}
+                            <div className="pt-3 border-t border-slate-100 space-y-3">
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Letzte 3 Läufe */}
+                                <div className="space-y-1.5">
+                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Letzte 3 Läufe</span>
+                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+                                    <table className="w-full text-[10px]">
+                                      <tbody>
+                                        {(() => {
+                                          const hist = sched.history || (sched.lastTriggered ? [sched.lastTriggered] : []);
+                                          if (hist.length === 0) {
+                                            return (
+                                              <tr>
+                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Bisher keine Läufe</td>
+                                              </tr>
+                                            );
+                                          }
+                                          return hist.map((timeStr, idx) => (
+                                            <tr key={idx} className={idx < hist.length - 1 ? "border-b border-slate-100" : ""}>
+                                              <td className="px-2.5 py-1.5 font-mono text-slate-600 text-left">
+                                                {idx + 1}. {new Date(timeStr).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                                              </td>
+                                            </tr>
+                                          ));
+                                        })()}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+
+                                {/* Nächste 3 Versandläufe */}
+                                <div className="space-y-1.5">
+                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Nächste 3 Läufe</span>
+                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+                                    <table className="w-full text-[10px]">
+                                      <tbody>
+                                        {(() => {
+                                          const nextRuns = calculateNextNRunTimes(sched, 3);
+                                          if (nextRuns.length === 0) {
+                                            return (
+                                              <tr>
+                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht aktiv / geplant</td>
+                                              </tr>
+                                            );
+                                          }
+                                          return nextRuns.map((timestamp, idx) => (
+                                            <tr key={idx} className={idx < nextRuns.length - 1 ? "border-b border-slate-100" : ""}>
+                                              <td className="px-2.5 py-1.5 font-mono text-emerald-600 font-bold text-left">
+                                                {idx + 1}. {new Date(timestamp).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                                              </td>
+                                            </tr>
+                                          ));
+                                        })()}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -2559,17 +2688,64 @@ export default function App() {
                               </div>
                             )}
 
-                            {/* Info metrics */}
-                            <div className="pt-2 border-t border-slate-100 grid grid-cols-2 gap-2 text-[10px] text-slate-500 font-medium">
-                              <div>
-                                <span className="block text-[9px] text-slate-400 uppercase">Letzter Versand:</span>
-                                <span className="font-mono">{sched.lastTriggered ? new Date(sched.lastTriggered).toLocaleString('de-DE') : 'Nie'}</span>
-                              </div>
-                              <div>
-                                <span className="block text-[9px] text-slate-400 uppercase">Nächster Lauf:</span>
-                                <span className="font-bold text-emerald-600 font-mono">
-                                  {sched.isActive && sched.nextRunTime ? new Date(sched.nextRunTime).toLocaleString('de-DE') : 'Nicht geplant'}
-                                </span>
+                            {/* Tabular History & Next Runs */}
+                            <div className="pt-3 border-t border-slate-100 space-y-3">
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Letzte 3 Läufe */}
+                                <div className="space-y-1.5">
+                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Letzte 3 Läufe</span>
+                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+                                    <table className="w-full text-[10px]">
+                                      <tbody>
+                                        {(() => {
+                                          const hist = sched.history || (sched.lastTriggered ? [sched.lastTriggered] : []);
+                                          if (hist.length === 0) {
+                                            return (
+                                              <tr>
+                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Bisher keine Läufe</td>
+                                              </tr>
+                                            );
+                                          }
+                                          return hist.map((timeStr, idx) => (
+                                            <tr key={idx} className={idx < hist.length - 1 ? "border-b border-slate-100" : ""}>
+                                              <td className="px-2.5 py-1.5 font-mono text-slate-600 text-left">
+                                                {idx + 1}. {new Date(timeStr).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                                              </td>
+                                            </tr>
+                                          ));
+                                        })()}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+
+                                {/* Nächste 3 Versandläufe */}
+                                <div className="space-y-1.5">
+                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Nächste 3 Läufe</span>
+                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
+                                    <table className="w-full text-[10px]">
+                                      <tbody>
+                                        {(() => {
+                                          const nextRuns = calculateNextNRunTimes(sched, 3);
+                                          if (nextRuns.length === 0) {
+                                            return (
+                                              <tr>
+                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht aktiv / geplant</td>
+                                              </tr>
+                                            );
+                                          }
+                                          return nextRuns.map((timestamp, idx) => (
+                                            <tr key={idx} className={idx < nextRuns.length - 1 ? "border-b border-slate-100" : ""}>
+                                              <td className="px-2.5 py-1.5 font-mono text-emerald-600 font-bold text-left">
+                                                {idx + 1}. {new Date(timestamp).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
+                                              </td>
+                                            </tr>
+                                          ));
+                                        })()}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>

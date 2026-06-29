@@ -42,6 +42,9 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
   const [testSuccess, setTestSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const isStandalone = typeof window !== 'undefined' && (window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone);
+
   // Generate a persistent local device ID for subscription tracking
   const getDeviceId = () => {
     let devId = localStorage.getItem('bb_push_device_id');
@@ -168,41 +171,40 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
   };
 
   // Trigger a test background notification with a delay so they can switch tabs/lock phone!
-  const triggerTestNotification = () => {
+  const triggerTestNotification = async () => {
     if (permission !== 'granted') return;
     
     setTestSuccess(true);
-    setTimeout(() => {
-      setTestSuccess(false);
-    }, 4000);
+    setErrorMsg(null);
+    
+    try {
+      const devId = getDeviceId();
+      const response = await fetch('/api/test-push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ deviceId: devId })
+      });
 
-    // Schedule native notification with 3 seconds delay
-    setTimeout(() => {
-      try {
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.ready.then((reg) => {
-            reg.showNotification('🏀 BFC Freiburg Kassenwart', {
-              body: 'Test erfolgreich! So landen Nachrichten auf deinem Handy, selbst wenn die App geschlossen ist! 🚀',
-              icon: '/icon.png',
-              badge: '/icon.png',
-              vibrate: [200, 100, 200],
-              tag: 'bfc_test_push_' + Date.now(),
-              data: {
-                url: window.location.origin
-              }
-            } as any);
-          });
-        } else {
-          new Notification('🏀 BFC Freiburg Kassenwart', {
-            body: 'Test erfolgreich! Native Benachrichtigung wurde empfangen! 🚀',
-            icon: '/icon.png',
-            tag: 'bfc_test_push_' + Date.now()
-          });
-        }
-      } catch (e) {
-        console.error('Failed to trigger native test:', e);
+      if (!response.ok) {
+        throw new Error(`Fehler: Server antwortete mit Status ${response.status}`);
       }
-    }, 3000);
+
+      const resData = await response.json();
+      if (resData.fallback) {
+        setErrorMsg('Hinweis: Dein Gerät nutzt den lokalen Fallback-Modus (Web-Push ist in diesem Browser nicht voll funktionsfähig). Auf iOS muss die App zum Home-Bildschirm hinzugefügt werden!');
+        setTestSuccess(false);
+      } else {
+        setTimeout(() => {
+          setTestSuccess(false);
+        }, 5000);
+      }
+    } catch (e: any) {
+      console.error('Failed to trigger server-side background test:', e);
+      setErrorMsg('Fehler beim Auslösen des Hintergrund-Tests: ' + (e.message || e));
+      setTestSuccess(false);
+    }
   };
 
   const getDeviceIcon = () => {
@@ -323,10 +325,10 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
             <div className="border border-slate-100 bg-slate-50/25 p-4 rounded-2xl space-y-3.5">
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-orange-500" />
-                <h4 className="text-xs font-black text-slate-800">Push-Zustellung testen</h4>
+                <h4 className="text-xs font-black text-slate-800">Push-Zustellung im Hintergrund testen</h4>
               </div>
               <p className="text-[10px] text-slate-500 leading-relaxed">
-                Klicke auf den Button, schließe sofort die App/Sperre dein Gerät und warte 3 Sekunden. Du erhältst eine echte System-Benachrichtigung!
+                Der Test wird jetzt <strong>über unseren Server</strong> ausgelöst. Klicke auf den Button und <strong>sperre sofort dein Handy oder minimiere den Browser</strong>, um zu sehen, dass die Benachrichtigung auch ankommt, wenn du offline bist!
               </p>
               
               <button
@@ -338,28 +340,49 @@ export default function PushSettingsModal({ isOpen, onClose }: PushSettingsModal
                 }`}
               >
                 <Volume2 className="w-4 h-4" />
-                {testSuccess ? 'Sende Test in 3s...' : 'Hintergrund-Zustellung testen'}
+                {testSuccess ? 'Server sendet in 4s...' : 'Echten Hintergrund-Test starten'}
               </button>
 
               {testSuccess && (
                 <p className="text-[9px] text-center text-emerald-600 font-bold animate-pulse">
-                  ✓ Geplant! Schließe jetzt das Browserfenster oder wechsle den Tab!
+                  ✓ Vom Server eingeplant! Sperre jetzt dein Gerät oder wechsle den Tab!
                 </p>
               )}
             </div>
           )}
 
           {/* How it works info */}
-          <div className="bg-[#FF6B00]/5 border border-[#FF6B00]/10 p-4 rounded-2xl space-y-2">
+          <div className="bg-[#FF6B00]/5 border border-[#FF6B00]/10 p-4 rounded-2xl space-y-2.5">
             <div className="flex items-center gap-1.5">
               <Info className="w-3.5 h-3.5 text-[#FF6B00]" />
-              <h4 className="text-xs font-black text-slate-800">Wie funktioniert die Hintergrund-Zustellung?</h4>
+              <h4 className="text-xs font-black text-slate-800">Wichtige Hinweise zur Hintergrund-Zustellung:</h4>
             </div>
+
+            {isIOS ? (
+              <div className="space-y-1.5 bg-amber-500/10 p-3 rounded-xl border border-amber-500/20">
+                <p className="text-[10px] text-amber-900 font-bold leading-relaxed">
+                  🍏 iOS / iPhone Besonderheit:
+                </p>
+                <p className="text-[10px] text-slate-600 leading-relaxed">
+                  Apple unterstützt Push-Benachrichtigungen <strong>ausschließlich</strong>, wenn die App auf deinem Home-Bildschirm installiert ist!
+                </p>
+                <p className="text-[10px] text-slate-600 leading-relaxed font-semibold">
+                  Anleitung: Tippe in Safari unten auf das Teilen-Symbol <span className="inline-block px-1 bg-white border border-slate-200 rounded text-slate-800 font-mono">⎙</span> (Viereck mit Pfeil nach oben) und wähle <strong>"Zum Home-Bildschirm"</strong>. Öffne dann die App von deinem Startbildschirm und aktiviere Push hier erneut.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-1.5 bg-sky-500/10 p-3 rounded-xl border border-sky-500/20">
+                <p className="text-[10px] text-sky-900 font-bold leading-relaxed">
+                  🤖 Android / Chrome Hinweis:
+                </p>
+                <p className="text-[10px] text-slate-600 leading-relaxed">
+                  Stelle sicher, dass Benachrichtigungen für deinen Browser in den <strong>Android-Systemeinstellungen</strong> nicht blockiert sind und kein strenger Energiesparmodus aktiv ist, um Zustellungen im gesperrten Zustand zu erlauben.
+                </p>
+              </div>
+            )}
+
             <p className="text-[10px] text-slate-500 leading-relaxed">
-              Wenn die App im Browser geschlossen ist, wird ein <strong>Service Worker</strong> im Hintergrund deines Betriebssystems aktiv gehalten. 
-            </p>
-            <p className="text-[10px] text-slate-500 leading-relaxed">
-              Deine eindeutige Geräteadresse wird sicher in unserer <strong>Firestore-Datenbank</strong> verschlüsselt gespeichert, damit der Kassenwart dich bei neuen Einträgen oder Mahnungen direkt auf dem Sperrbildschirm deines Handys erreichen kann.
+              Wenn die App geschlossen ist, wird ein registrierter <strong>Service Worker</strong> im Hintergrund deines Betriebssystems aktiv gehalten. Deine Geräteadresse wird in unserer <strong>Firestore-Datenbank</strong> verschlüsselt gespeichert, damit der Kassenwart dich bei neuen Einträgen direkt auf dem Sperrbildschirm deines Handys erreichen kann.
             </p>
           </div>
 

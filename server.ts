@@ -136,6 +136,59 @@ app.post('/api/trigger-push', async (req, res) => {
   }
 });
 
+// 2b. Endpoint: Single Device Delayed Test Push Endpoint
+app.post('/api/test-push', async (req, res) => {
+  const { deviceId } = req.body;
+  if (!deviceId) {
+    return res.status(400).json({ error: "Missing parameter: 'deviceId' is required." });
+  }
+
+  try {
+    const docSnap = await getDoc(doc(db, 'push_subscriptions', deviceId));
+    if (!docSnap.exists()) {
+      return res.status(404).json({ error: "No subscription found for this device in Firestore." });
+    }
+
+    const data = docSnap.data();
+    if (!data.endpoint || data.endpoint === 'local_notification_api_granted') {
+      return res.json({ 
+        success: false, 
+        fallback: true,
+        message: "Device is registered with fallback local notifications (full Web Push not supported by this browser/OS)." 
+      });
+    }
+
+    const subscription = {
+      endpoint: data.endpoint,
+      keys: {
+        auth: data.keys?.auth || '',
+        p256dh: data.keys?.p256dh || ''
+      }
+    };
+
+    const payload = JSON.stringify({
+      title: '🏀 BFC Freiburg Kassenwart',
+      message: 'Hintergrund-Zustellung erfolgreich! 🚀 Diese Nachricht wurde über den Server zugestellt, während die App geschlossen war!',
+      url: '/'
+    });
+
+    // Schedule sending after 4 seconds to allow the user to minimize the app / lock the device
+    setTimeout(async () => {
+      try {
+        console.log(`[PUSH] Sending delayed single-device test push to device ${deviceId}...`);
+        await webpush.sendNotification(subscription, payload);
+        console.log(`[PUSH] Delayed single-device test push sent successfully to ${deviceId}.`);
+      } catch (err: any) {
+        console.warn(`[PUSH] Delayed single-device test push failed for ${deviceId}:`, err.message);
+      }
+    }, 4000);
+
+    res.json({ success: true, delayed: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Cache processed notifications to ensure we don't broadcast the same notification multiple times
 const processedNotifications = new Set<string>();
 

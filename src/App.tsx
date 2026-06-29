@@ -97,9 +97,72 @@ export default function App() {
     return 'default';
   });
 
+  const [areNotificationsMuted, setAreNotificationsMuted] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('bb_notifs_muted') === 'true';
+    }
+    return false;
+  });
+
+  // Register Service Worker for mobile browser notification support
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => {
+          console.log('[SW] Registered successfully with scope:', reg.scope);
+        })
+        .catch((err) => {
+          console.warn('[SW] Registration failed:', err);
+        });
+    }
+  }, []);
+
+  const triggerNotificationWithSW = (title: string, body: string) => {
+    if (typeof window === 'undefined') return;
+    if (areNotificationsMuted) return;
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+
+    // Try through service worker (required for Android Chrome and highly robust)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then((registration) => {
+        const options: any = {
+          body,
+          icon: '/icon.png',
+          badge: '/icon.png',
+          vibrate: [200, 100, 200]
+        };
+        registration.showNotification(title, options);
+      }).catch((err) => {
+        console.warn("Service Worker showNotification failed, falling back to window Notification:", err);
+        new Notification(title, { body, icon: '/icon.png' });
+      });
+    } else {
+      // Fallback
+      new Notification(title, { body, icon: '/icon.png' });
+    }
+  };
+
   const requestNotificationPermission = async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
       alert("Ihr Browser unterstützt leider keine Benachrichtigungen.");
+      return;
+    }
+
+    if (Notification.permission === 'granted') {
+      // Toggle mute/unmute
+      const newMuteState = !areNotificationsMuted;
+      setAreNotificationsMuted(newMuteState);
+      localStorage.setItem('bb_notifs_muted', String(newMuteState));
+      
+      if (!newMuteState) {
+        // Show test notification on unmute
+        triggerNotificationWithSW("🔔 Live-Meldungen reaktiviert!", "Du erhältst ab jetzt wieder Benachrichtigungen bei neuen Einträgen.");
+      }
+      return;
+    }
+
+    if (Notification.permission === 'denied') {
+      alert("Benachrichtigungen sind in Ihrem Browser blockiert. Bitte aktivieren Sie diese in den Website-Einstellungen Ihres Browsers, um Live-Meldungen zu empfangen.");
       return;
     }
 
@@ -107,9 +170,13 @@ export default function App() {
       const permission = await Notification.requestPermission();
       setNotifPermission(permission);
       if (permission === 'granted') {
-        new Notification("🔔 Benachrichtigungen aktiviert!", {
-          body: "Du wirst ab jetzt benachrichtigt, sobald Getränke oder Strafen eingetragen werden.",
-        });
+        setAreNotificationsMuted(false);
+        localStorage.setItem('bb_notifs_muted', 'false');
+        
+        // Wait a small moment to ensure the permission state is fully registered by the browser/SW
+        setTimeout(() => {
+          triggerNotificationWithSW("🔔 Benachrichtigungen aktiviert!", "Du wirst ab jetzt benachrichtigt, sobald Getränke oder Strafen eingetragen werden.");
+        }, 300);
       }
     } catch (err) {
       console.error("Fehler beim Anfordern der Benachrichtigungs-Berechtigung:", err);
@@ -119,6 +186,7 @@ export default function App() {
   const triggerBrowserNotification = (tx: Transaction) => {
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
+    if (areNotificationsMuted) return;
 
     let title = "Mannschaftskasse Update";
     let body = "";
@@ -133,14 +201,12 @@ export default function App() {
       title = `💳 Einzahlung: ${tx.playerName}`;
       body = `${tx.playerName} hat einen Betrag von ${Math.abs(tx.amount).toFixed(2)} € eingezahlt.`;
     } else if (tx.type === 'expense') {
-      title = `📉 Ausgabe erfasst`;
+      title = `Ausgabe erfasst 📉`;
       body = `Ausgabe: "${tx.itemName}" (${tx.amount.toFixed(2)} €).`;
     }
 
     if (body) {
-      new Notification(title, {
-        body,
-      });
+      triggerNotificationWithSW(title, body);
     }
   };
 
@@ -1188,15 +1254,19 @@ export default function App() {
               <button
                 onClick={requestNotificationPermission}
                 className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs ${
-                  notifPermission === 'granted'
+                  notifPermission === 'granted' && !areNotificationsMuted
                     ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                    : notifPermission === 'granted' && areNotificationsMuted
+                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
                     : notifPermission === 'denied'
                     ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
                     : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-slate-200'
                 }`}
                 title={
-                  notifPermission === 'granted'
-                    ? 'Browser-Benachrichtigungen sind AKTIVIERT 🔔'
+                  notifPermission === 'granted' && !areNotificationsMuted
+                    ? 'Browser-Benachrichtigungen sind AKTIVIERT 🔔 (Klicken zum Stummschalten)'
+                    : notifPermission === 'granted' && areNotificationsMuted
+                    ? 'Browser-Benachrichtigungen sind STUMMGESCHALTET 🔕 (Klicken zum Aktivieren)'
                     : notifPermission === 'denied'
                     ? 'Browser-Benachrichtigungen sind BLOCKIERT ❌ (Bitte in den Browser-Einstellungen erlauben)'
                     : 'Browser-Benachrichtigungen aktivieren 🔔'
@@ -1204,13 +1274,20 @@ export default function App() {
                 id="live-notifs-btn"
               >
                 {notifPermission === 'granted' ? (
-                  <>
-                    <Bell className="w-4 h-4 text-emerald-600" />
-                    <span>Live-Meldungen: Ein</span>
-                  </>
+                  !areNotificationsMuted ? (
+                    <>
+                      <Bell className="w-4 h-4 text-emerald-600 animate-bounce" />
+                      <span>Live-Meldungen: Ein</span>
+                    </>
+                  ) : (
+                    <>
+                      <BellOff className="w-4 h-4 text-slate-500" />
+                      <span>Live-Meldungen: Stumm</span>
+                    </>
+                  )
                 ) : notifPermission === 'denied' ? (
                   <>
-                    <BellOff className="w-4 h-4 text-rose-600 animate-pulse" />
+                    <BellOff className="w-4 h-4 text-rose-600" />
                     <span>Live-Meldungen: Blockiert</span>
                   </>
                 ) : (

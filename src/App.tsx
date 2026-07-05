@@ -1666,34 +1666,56 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-850 font-sans antialiased selection:bg-orange-500/10 selection:text-orange-900">
       
       {isFirebaseLoading && (
-        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-50/95 backdrop-blur-xs animate-fade-in">
-          <div className="w-16 h-16 bg-gradient-to-br from-[#FF6B00] to-amber-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/15 animate-bounce mb-4">
-            <Dribbble className="w-10 h-10 animate-spin-slow text-white" />
+        <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/98 backdrop-blur-md animate-fade-in">
+          <div className="relative group mb-6">
+            <div className="absolute -inset-4 bg-gradient-to-r from-[#FF6B00] via-amber-500 to-emerald-600 rounded-full blur-xl opacity-75 animate-pulse" />
+            <div className="relative w-24 h-24 bg-slate-900 border-2 border-slate-800 rounded-3xl flex items-center justify-center p-2 shadow-2xl animate-bounce">
+              <img 
+                src="/icon.png" 
+                alt="BFC Freiburg Logo" 
+                className="w-full h-full object-contain" 
+                referrerPolicy="no-referrer"
+              />
+            </div>
           </div>
-          <p className="text-sm font-semibold text-slate-700 animate-pulse">Lade Mannschaftskasse...</p>
+          <p className="text-base font-bold text-slate-200 tracking-wide">BFC Freiburg e.V.</p>
+          <p className="text-xs text-[#FF6B00] font-semibold animate-pulse mt-1">Lade Mannschaftskasse...</p>
         </div>
       )}
       
       {/* HEADER BANNER */}
-      <header className="relative bg-white border-b border-slate-200 px-4 py-6 md:py-8 overflow-hidden shadow-xs">
+      <header className="relative bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border-b border-[#FF6B00]/30 px-4 py-6 md:py-8 overflow-hidden shadow-lg text-white">
         
-        {/* Basketball lines abstract decoration */}
-        <div className="absolute right-[-100px] top-[-50px] w-80 h-80 rounded-full border-[3px] border-slate-100 pointer-events-none" />
-        <div className="absolute right-[-20px] top-[100px] w-48 h-48 rounded-full border-2 border-slate-100 pointer-events-none" />
+        {/* Basketball and Pine Forest atmospheric gradients */}
+        <div className="absolute right-[-80px] top-[-80px] w-96 h-96 rounded-full bg-orange-600/10 blur-3xl pointer-events-none animate-pulse" />
+        <div className="absolute left-[15%] bottom-[-50px] w-72 h-72 rounded-full bg-emerald-600/5 blur-3xl pointer-events-none" />
+        
+        {/* Subtle grid pattern overlay */}
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(255,107,0,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,107,0,0.02)_1px,transparent_1px)] bg-[size:30px_30px] opacity-40 pointer-events-none" />
 
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-          <div className="flex items-center gap-3.5">
-            <div className="w-14 h-14 bg-gradient-to-br from-[#FF6B00] to-amber-500 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/15 shrink-0 transform -rotate-3 hover:rotate-3 transition duration-300">
-              <Dribbble className="w-8 h-8 animate-spin-slow text-white" />
+          <div className="flex items-center gap-4">
+            {/* Real Logo Badge */}
+            <div className="relative group shrink-0">
+              <div className="absolute -inset-1.5 bg-gradient-to-r from-[#FF6B00] to-amber-500 rounded-2xl blur-md opacity-75 group-hover:opacity-100 transition duration-500 animate-pulse" />
+              <div className="relative w-16 h-16 sm:w-20 sm:h-20 bg-slate-950 border-2 border-slate-800 rounded-2xl flex items-center justify-center p-1 shadow-2xl transition duration-300 transform group-hover:scale-105 group-hover:rotate-1">
+                <img 
+                  src="/icon.png" 
+                  alt="BFC Freiburg Logo" 
+                  className="w-full h-full object-contain" 
+                  referrerPolicy="no-referrer"
+                />
+              </div>
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] bg-orange-50 text-[#FF6B00] font-extrabold uppercase px-2.5 py-0.5 rounded-full tracking-wider border border-orange-200">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] bg-[#FF6B00]/20 text-[#FF6B00] font-extrabold uppercase px-2.5 py-0.5 rounded-full tracking-wider border border-[#FF6B00]/40">
                   Mannschafts-Kasse
                 </span>
-                <span className="text-xs text-slate-400">• BFC Freiburg</span>
+                <span className="text-xs text-slate-400 font-medium">• BFC Freiburg e.V.</span>
+                <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-extrabold px-2 py-0.5 rounded border border-emerald-500/20">EST. 2016</span>
               </div>
-              <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tight mt-1 flex items-center gap-2">
+              <h1 className="text-2xl md:text-3.5xl font-black text-white tracking-tight mt-1.5 flex items-center gap-2">
                 BFC Freiburg Mannschaftskasse
               </h1>
             </div>
@@ -1705,7 +1727,7 @@ export default function App() {
               <>
                 <button
                   onClick={() => setShowBackupPanel(!showBackupPanel)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
                   id="backup-panel-toggle-btn"
                 >
                   <Layers className="w-4 h-4 text-[#FF6B00]" />
@@ -1713,7 +1735,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => setIsCatalogOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
                   id="catalog-manager-toggle-btn"
                 >
                   <Settings className="w-4 h-4 text-[#FF6B00]" />
@@ -1721,7 +1743,7 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => setIsNotificationPlannerOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
                   id="notification-planner-toggle-btn"
                 >
                   <Bell className="w-4 h-4 text-[#FF6B00]" />
@@ -1729,10 +1751,10 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => setIsResetDbModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  className="flex items-center gap-2 px-4 py-2 bg-rose-950/40 hover:bg-rose-900/50 text-rose-200 hover:text-rose-100 border border-rose-900/40 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
                   id="reset-db-toggle-btn"
                 >
-                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  <Trash2 className="w-4 h-4 text-rose-400" />
                   Daten zurücksetzen (Blanko)
                 </button>
               </>
@@ -1743,12 +1765,12 @@ export default function App() {
                 onClick={requestNotificationPermission}
                 className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs ${
                   notifPermission === 'granted' && !areNotificationsMuted
-                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
+                    ? 'bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border-emerald-900/40'
                     : notifPermission === 'granted' && areNotificationsMuted
-                    ? 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
+                    ? 'bg-slate-900/60 hover:bg-slate-800/80 text-slate-400 border-slate-800'
                     : notifPermission === 'denied'
-                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-slate-200'
+                    ? 'bg-rose-950/40 hover:bg-rose-900/50 text-rose-300 border-rose-900/40'
+                    : 'bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border-slate-800'
                 }`}
                 title={
                   notifPermission === 'granted' && !areNotificationsMuted
@@ -1764,7 +1786,7 @@ export default function App() {
                 {notifPermission === 'granted' ? (
                   !areNotificationsMuted ? (
                     <>
-                      <Bell className="w-4 h-4 text-emerald-600 animate-bounce" />
+                      <Bell className="w-4 h-4 text-emerald-400 animate-bounce" />
                       <span>Live-Meldungen: Ein</span>
                     </>
                   ) : (
@@ -1775,12 +1797,12 @@ export default function App() {
                   )
                 ) : notifPermission === 'denied' ? (
                   <>
-                    <BellOff className="w-4 h-4 text-rose-600" />
+                    <BellOff className="w-4 h-4 text-rose-400" />
                     <span>Live-Meldungen: Blockiert</span>
                   </>
                 ) : (
                   <>
-                    <Bell className="w-4 h-4 text-slate-500" />
+                    <Bell className="w-4 h-4 text-slate-400" />
                     <span>Live-Meldungen: Aus</span>
                   </>
                 )}
@@ -1795,11 +1817,11 @@ export default function App() {
                   setIsAdminMode(false);
                   setShowBackupPanel(false);
                 }}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-900/40 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-lock-btn-player"
                 title="Spieler-Zugriff sperren"
               >
-                <Unlock className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <Unlock className="w-4 h-4 text-emerald-400 animate-pulse" />
                 <span>Spieler (Aktiv)</span>
               </button>
             ) : (
@@ -1809,11 +1831,11 @@ export default function App() {
                   setAdminPromptPin('');
                   setAdminPromptError('');
                 }}
-                className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-unlock-btn-player"
                 title="Spieler Log In"
               >
-                <Lock className="w-4 h-4 text-rose-600" />
+                <Lock className="w-4 h-4 text-slate-400" />
                 <span>Spieler (Log In)</span>
               </button>
             )}
@@ -1826,11 +1848,11 @@ export default function App() {
                   setIsBookingAuthorized(false);
                   setShowBackupPanel(false);
                 }}
-                className="flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                className="flex items-center gap-2 px-4 py-2 bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border border-amber-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-lock-btn-trainer"
                 title="Trainer-Zugriff sperren"
               >
-                <Unlock className="w-4 h-4 text-amber-600 animate-pulse" />
+                <Unlock className="w-4 h-4 text-amber-400 animate-pulse" />
                 <span>Trainer (Aktiv)</span>
               </button>
             ) : (
@@ -1840,11 +1862,11 @@ export default function App() {
                   setAdminPromptPin('');
                   setAdminPromptError('');
                 }}
-                className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-200 border border-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-unlock-btn-trainer"
                 title="Trainer Log In"
               >
-                <Lock className="w-4 h-4 text-rose-600" />
+                <Lock className="w-4 h-4 text-slate-400" />
                 <span>Trainer (Log In)</span>
               </button>
             )}

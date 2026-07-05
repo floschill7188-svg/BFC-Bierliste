@@ -1,22 +1,21 @@
 import { Drink, Fine, Player, Expense } from '../types';
 
 export const DEFAULT_DRINKS: Drink[] = [
-  { id: 'd1', name: 'Bier (0.5l)', price: 2.00, isActive: true },
-  { id: 'd2', name: 'Spezi / Cola (0.5l)', price: 1.50, isActive: true },
-  { id: 'd3', name: 'Apfelschorle (0.5l)', price: 1.50, isActive: true },
-  { id: 'd4', name: 'Mineralwasser (0.5l)', price: 1.00, isActive: true },
-  { id: 'd5', name: 'Isotonischer Drink', price: 1.80, isActive: true },
+  { id: 'd1', name: 'Bier / Limo', price: 1.70, isActive: true },
+  { id: 'd2', name: 'Ermäßigt', price: 1.20, isActive: true },
 ];
 
 export const DEFAULT_FINES: Fine[] = [
-  { id: 'f1', name: 'Zuspätkommen zum Training', amount: 5.00, isActive: true },
-  { id: 'f2', name: 'Zuspätkommen zum Spiel', amount: 10.00, isActive: true },
-  { id: 'f3', name: 'Trikot / Ausrüstung vergessen', amount: 5.00, isActive: true },
-  { id: 'f4', name: 'Technisches Foul im Spiel', amount: 10.00, isActive: true },
-  { id: 'f5', name: 'Unsportliches Verhalten (Training/Spiel)', amount: 15.00, isActive: true },
-  { id: 'f6', name: 'Handyklingeln in der Kabine', amount: 3.00, isActive: true },
-  { id: 'f7', name: 'Dreckige Schuhe in der Halle', amount: 5.00, isActive: true },
-  { id: 'f8', name: 'Kabinendienst geschwänzt', amount: 10.00, isActive: true },
+  { id: 'f1', name: 'Zu spät zum Training', amount: 3.40, points: 1, isActive: true },
+  { id: 'f2', name: 'Zu spät zum Treffpunkt (alle Spiele)', amount: 6.80, points: 3, isActive: true },
+  { id: 'f3', name: 'Unentschuldigtes Fehlen im Training', amount: 6.80, points: 3, isActive: true },
+  { id: 'f4', name: 'Unentschuldigtes Fehlen im Spiel', amount: 0.00, points: 6, isActive: true },
+  { id: 'f5', name: 'Sportutensilien vergessen', amount: 1.70, points: 0, isActive: true },
+  { id: 'f6', name: 'Technisches Foul (Spieler)', amount: 5.10, points: 1, isActive: true },
+  { id: 'f7', name: 'Verweisung aus der Halle', amount: 17.00, points: 6, isActive: true },
+  { id: 'f8', name: 'Amt/Job nicht ausgeführt', amount: 5.10, points: 3, isActive: true },
+  { id: 'f9', name: 'Trikot nicht richtig in die Tasche', amount: 3.40, points: 1, isActive: true },
+  { id: 'f10', name: 'Keine Reaktion auf Umfragen etc.', amount: 1.70, points: 1, isActive: true },
 ];
 
 export const DEMO_PLAYERS: Player[] = [

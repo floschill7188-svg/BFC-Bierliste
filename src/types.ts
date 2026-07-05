@@ -10,6 +10,7 @@ export interface Fine {
   name: string;
   amount: number;
   isActive: boolean;
+  points?: number; // Strafpunkte (penalty points)
 }
 
 export interface Player {

@@ -19,22 +19,44 @@ export default function CatalogManager({
 }: CatalogManagerProps) {
   const [activeTab, setActiveTab] = useState<'drinks' | 'fines'>('drinks');
 
-  // Drink Form State
+  // Drink Form State (using '0,00' format for ATM style)
   const [newDrinkName, setNewDrinkName] = useState('');
-  const [newDrinkPrice, setNewDrinkPrice] = useState('');
+  const [newDrinkPrice, setNewDrinkPrice] = useState('0,00');
 
   // Fine Form State
   const [newFineName, setNewFineName] = useState('');
-  const [newFineAmount, setNewFineAmount] = useState('');
+  const [newFineAmount, setNewFineAmount] = useState('0,00');
+  const [newFinePoints, setNewFinePoints] = useState('0');
 
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // Helper for ATM style money inputs (automatic filling as typing)
+  const handleMoneyInputChange = (val: string, setter: (v: string) => void) => {
+    const digits = val.replace(/\D/g, '');
+    if (!digits) {
+      setter('0,00');
+      return;
+    }
+    const cents = parseInt(digits, 10);
+    const euros = cents / 100;
+    setter(euros.toLocaleString('de-DE', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }));
+  };
+
+  // Helper to parse ATM style string back to float
+  const parseFormattedPrice = (formatted: string): number => {
+    const cleaned = formatted.replace(/\./g, '').replace(/,/g, '.');
+    const num = parseFloat(cleaned);
+    return isNaN(num) ? 0 : num;
+  };
 
   // Add Drink
   const handleAddDrink = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newDrinkName.trim() || !newDrinkPrice) return;
-    const price = parseFloat(newDrinkPrice);
-    if (isNaN(price) || price < 0) return;
+    if (!newDrinkName.trim()) return;
+    const price = parseFormattedPrice(newDrinkPrice);
 
     const newDrink: Drink = {
       id: 'd_' + Date.now(),
@@ -45,43 +67,58 @@ export default function CatalogManager({
 
     onUpdateDrinks([...drinks, newDrink]);
     setNewDrinkName('');
-    setNewDrinkPrice('');
+    setNewDrinkPrice('0,00');
   };
 
   // Add Fine
   const handleAddFine = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newFineName.trim() || !newFineAmount) return;
-    const amount = parseFloat(newFineAmount);
-    if (isNaN(amount) || amount < 0) return;
+    if (!newFineName.trim()) return;
+    const amount = parseFormattedPrice(newFineAmount);
+    const points = parseInt(newFinePoints, 10);
 
     const newFine: Fine = {
       id: 'f_' + Date.now(),
       name: newFineName.trim(),
       amount: amount,
+      points: isNaN(points) ? 0 : points,
       isActive: true,
     };
 
     onUpdateFines([...fines, newFine]);
     setNewFineName('');
-    setNewFineAmount('');
+    setNewFineAmount('0,00');
+    setNewFinePoints('0');
   };
 
-  // Update Price
+  // Update Price (via ATM style logic)
   const handlePriceChange = (id: string, priceStr: string) => {
-    const price = parseFloat(priceStr);
-    if (isNaN(price) || price < 0) return;
+    const digits = priceStr.replace(/\D/g, '');
+    if (!digits) return;
+    const cents = parseInt(digits, 10);
+    const price = cents / 100;
     onUpdateDrinks(
       drinks.map((d) => (d.id === id ? { ...d, price } : d))
     );
   };
 
-  // Update Fine Amount
+  // Update Fine Amount (via ATM style logic)
   const handleAmountChange = (id: string, amountStr: string) => {
-    const amount = parseFloat(amountStr);
-    if (isNaN(amount) || amount < 0) return;
+    const digits = amountStr.replace(/\D/g, '');
+    if (!digits) return;
+    const cents = parseInt(digits, 10);
+    const amount = cents / 100;
     onUpdateFines(
       fines.map((f) => (f.id === id ? { ...f, amount } : f))
+    );
+  };
+
+  // Update Fine Points
+  const handlePointsChange = (id: string, pointsStr: string) => {
+    const points = parseInt(pointsStr, 10);
+    if (isNaN(points) || points < 0) return;
+    onUpdateFines(
+      fines.map((f) => (f.id === id ? { ...f, points } : f))
     );
   };
 
@@ -211,13 +248,12 @@ export default function CatalogManager({
             <div>
               <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Preis (€)</label>
               <input
-                type="number"
-                step="0.05"
-                min="0"
-                placeholder="z.B. 1.50"
+                type="text"
+                inputMode="numeric"
+                placeholder="0,00"
                 value={newDrinkPrice}
-                onChange={(e) => setNewDrinkPrice(e.target.value)}
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-[#FF6B00]"
+                onChange={(e) => handleMoneyInputChange(e.target.value, setNewDrinkPrice)}
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-[#FF6B00] font-mono text-right"
               />
             </div>
             <div className="flex items-end">
@@ -257,12 +293,11 @@ export default function CatalogManager({
                   <div className="flex items-center gap-3">
                     <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-xs">
                       <input
-                        type="number"
-                        step="0.05"
-                        min="0"
-                        value={drink.price.toFixed(2)}
+                        type="text"
+                        inputMode="numeric"
+                        value={drink.price.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         onChange={(e) => handlePriceChange(drink.id, e.target.value)}
-                        className="w-14 bg-transparent border-none text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-0 p-0"
+                        className="w-16 bg-transparent border-none text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-0 p-0 font-bold"
                       />
                       <span className="text-xs text-slate-400 ml-1">€</span>
                     </div>
@@ -300,12 +335,12 @@ export default function CatalogManager({
       {activeTab === 'fines' && (
         <div className="space-y-6" id="fines-catalog-panel">
           {/* Add Fine Form */}
-          <form onSubmit={handleAddFine} className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-4 bg-slate-50/50 border border-slate-200 rounded-xl">
+          <form onSubmit={handleAddFine} className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4 bg-slate-50/50 border border-slate-200 rounded-xl">
             <div className="sm:col-span-1.5">
               <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Vergehen / Strafe</label>
               <input
                 type="text"
-                placeholder="z.B. Zuspätkommen, Trikot vergessen"
+                placeholder="z.B. Zuspätkommen"
                 value={newFineName}
                 onChange={(e) => setNewFineName(e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-[#FF6B00]"
@@ -314,19 +349,29 @@ export default function CatalogManager({
             <div>
               <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Betrag (€)</label>
               <input
-                type="number"
-                step="0.50"
-                min="0"
-                placeholder="z.B. 5.00"
+                type="text"
+                inputMode="numeric"
+                placeholder="0,00"
                 value={newFineAmount}
-                onChange={(e) => setNewFineAmount(e.target.value)}
+                onChange={(e) => handleMoneyInputChange(e.target.value, setNewFineAmount)}
+                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-[#FF6B00] font-mono text-right"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">Strafpunkte (Punkte)</label>
+              <input
+                type="number"
+                min="0"
+                placeholder="z.B. 1"
+                value={newFinePoints}
+                onChange={(e) => setNewFinePoints(e.target.value)}
                 className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-[#FF6B00]"
               />
             </div>
             <div className="flex items-end">
               <button
                 type="submit"
-                className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white text-sm font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white text-sm font-semibold py-2 px-4 rounded-lg flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer animate-fade-in"
               >
                 <Plus className="w-4 h-4" />
                 Hinzufügen
@@ -358,16 +403,28 @@ export default function CatalogManager({
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-xs">
+                    {/* Amount */}
+                    <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-xs" title="Geldstrafe">
                       <input
-                        type="number"
-                        step="0.50"
-                        min="0"
-                        value={fine.amount.toFixed(2)}
+                        type="text"
+                        inputMode="numeric"
+                        value={fine.amount.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         onChange={(e) => handleAmountChange(fine.id, e.target.value)}
-                        className="w-14 bg-transparent border-none text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-0 p-0"
+                        className="w-16 bg-transparent border-none text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-0 p-0 font-bold"
                       />
                       <span className="text-xs text-slate-400 ml-1">€</span>
+                    </div>
+
+                    {/* Points */}
+                    <div className="flex items-center bg-white border border-slate-200 rounded-lg px-2 py-1 shadow-xs" title="Strafpunkte">
+                      <input
+                        type="number"
+                        min="0"
+                        value={fine.points ?? 0}
+                        onChange={(e) => handlePointsChange(fine.id, e.target.value)}
+                        className="w-8 bg-transparent border-none text-right font-mono text-sm text-slate-800 focus:outline-none focus:ring-0 p-0 font-bold text-amber-600"
+                      />
+                      <span className="text-[10px] text-slate-400 font-bold ml-1">Pkt</span>
                     </div>
 
                     {/* Active Checkbox */}

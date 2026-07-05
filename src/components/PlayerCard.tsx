@@ -41,6 +41,11 @@ export default function PlayerCard({
   const totalDrinksQty = Object.values(player.drinksCount).reduce((a, b) => a + b, 0);
   const totalFinesQty = Object.values(player.finesCount).reduce((a, b) => a + b, 0);
 
+  const totalPoints = Object.entries(player.finesCount).reduce((acc, [fineId, qty]) => {
+    const fine = fines.find((f) => f.id === fineId);
+    return acc + (fine && fine.points ? fine.points * qty : 0);
+  }, 0);
+
   // Determine status color/styling
   let balanceBg = 'bg-white border-slate-200 hover:bg-slate-50/80';
   let balanceText = 'text-slate-600';
@@ -97,17 +102,30 @@ export default function PlayerCard({
       </div>
 
       {/* Middle row: Stats counters */}
-      <div className="grid grid-cols-2 gap-2 mb-4 bg-slate-50/80 p-2 rounded-xl border border-slate-200/60 text-xs font-mono">
-        <div className="flex items-center gap-1.5 text-slate-600">
-          <Beer className="w-3.5 h-3.5 text-[#FF6B00] shrink-0" />
-          <span>Getränke:</span>
-          <span className="font-bold text-slate-900 ml-auto">{totalDrinksQty}</span>
+      <div className="flex flex-col gap-1.5 mb-4 bg-slate-50/80 p-2 rounded-xl border border-slate-200/60 text-xs font-mono">
+        <div className="grid grid-cols-3 gap-1">
+          <div className="flex items-center gap-1 text-slate-600 min-w-0">
+            <Beer className="w-3.5 h-3.5 text-[#FF6B00] shrink-0" />
+            <span className="truncate">Getränke:</span>
+            <span className="font-bold text-slate-900 ml-auto">{totalDrinksQty}</span>
+          </div>
+          <div className="flex items-center gap-1 text-slate-600 min-w-0 border-l border-slate-200/60 pl-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+            <span className="truncate">Strafen:</span>
+            <span className="font-bold text-slate-900 ml-auto">{totalFinesQty}</span>
+          </div>
+          <div className="flex items-center gap-1 text-slate-600 min-w-0 border-l border-slate-200/60 pl-1.5" title="Strafpunkte">
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+            <span className="truncate">Punkte:</span>
+            <span className="font-bold text-amber-600 ml-auto">{totalPoints}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-1.5 text-slate-600">
-          <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-          <span>Strafen:</span>
-          <span className="font-bold text-slate-900 ml-auto">{totalFinesQty}</span>
-        </div>
+        {totalPoints >= 3 && (
+          <div className="text-[10px] text-amber-800 bg-amber-100/60 border border-amber-200 px-1.5 py-0.5 rounded-md flex items-center justify-between font-sans">
+            <span className="font-bold">⚠️ Zusatz-Dienste fällig:</span>
+            <span className="font-mono font-black text-rose-700 bg-white px-1.5 py-0.5 rounded border border-amber-200">{Math.floor(totalPoints / 3)} fällig</span>
+          </div>
+        )}
       </div>
 
       {/* Bottom row: Quick action buttons */}

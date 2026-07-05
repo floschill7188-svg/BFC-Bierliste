@@ -67,6 +67,11 @@ export default function PlayerDetailModal({
     return acc + (fine ? fine.amount * qty : 0);
   }, 0);
 
+  const totalPoints = Object.entries(player.finesCount).reduce((acc, [fineId, qty]) => {
+    const fine = fines.find((f) => f.id === fineId);
+    return acc + (fine && fine.points ? fine.points * qty : 0);
+  }, 0);
+
   const totalCost = totalDrinksCost + totalFinesCost;
   const balance = totalCost - player.totalPaid;
 
@@ -198,7 +203,7 @@ export default function PlayerDetailModal({
         </div>
 
         {/* Balance Cards Bar */}
-        <div className="grid grid-cols-3 gap-2 px-6 py-4 bg-slate-50/50 border-b border-slate-100">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-6 py-4 bg-slate-50/50 border-b border-slate-100">
           <div className="p-3 bg-white rounded-xl border border-slate-100 text-center shadow-2xs">
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
               {balance < 0 ? 'Guthaben' : 'Ausstehend'}
@@ -218,6 +223,19 @@ export default function PlayerDetailModal({
             <p className="text-lg font-black text-emerald-600 mt-0.5 font-mono">
               {player.totalPaid.toFixed(2)} €
             </p>
+          </div>
+          <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200/60 text-center shadow-2xs flex flex-col justify-between">
+            <span className="text-[10px] uppercase font-bold text-amber-700 tracking-wider">Strafpunkte</span>
+            <div className="flex items-center justify-center gap-1.5 mt-0.5">
+              <p className="text-lg font-black text-amber-600 font-mono">
+                {totalPoints} P
+              </p>
+              {totalPoints >= 3 && (
+                <span className="text-[10px] px-2 py-0.5 bg-rose-100 text-rose-800 font-bold rounded-full border border-rose-200" title="Zusatz-Dienste fällig">
+                  {Math.floor(totalPoints / 3)}D
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -330,7 +348,14 @@ export default function PlayerDetailModal({
                           <span className="text-sm font-semibold text-slate-800 block truncate" title={fine.name}>
                             {fine.name}
                           </span>
-                          <span className="text-xs text-amber-600 font-mono font-bold">{fine.amount.toFixed(2)} €</span>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs text-amber-600 font-mono font-bold">{fine.amount.toFixed(2)} €</span>
+                            {fine.points ? (
+                              <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded font-sans">
+                                +{fine.points} Pkt.
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-2.5 shrink-0">

@@ -170,6 +170,14 @@ function calculateNextNRunTimes(schedule: NotificationSchedule, n: number): numb
 export default function App() {
   // --- STATE ---
   const [isFirebaseLoading, setIsFirebaseLoading] = useState(true);
+  const [isAppLocked, setIsAppLocked] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('bfc_app_unlocked') !== 'true';
+    }
+    return true;
+  });
+  const [appPasswordInput, setAppPasswordInput] = useState('');
+  const [appPasswordError, setAppPasswordError] = useState('');
   const [players, setPlayers] = useState<Player[]>([]);
   const [drinks, setDrinks] = useState<Drink[]>([]);
   const [fines, setFines] = useState<Fine[]>([]);
@@ -1665,7 +1673,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-850 font-sans antialiased selection:bg-orange-500/10 selection:text-orange-900">
       
-      {isFirebaseLoading && (
+      {isFirebaseLoading ? (
         <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/98 backdrop-blur-md animate-fade-in">
           <div className="relative group mb-6">
             <div className="absolute -inset-4 bg-gradient-to-r from-[#FF6B00] via-amber-500 to-emerald-600 rounded-full blur-xl opacity-75 animate-pulse" />
@@ -1681,7 +1689,99 @@ export default function App() {
           <p className="text-base font-bold text-slate-200 tracking-wide">BFC Freiburg e.V.</p>
           <p className="text-xs text-[#FF6B00] font-semibold animate-pulse mt-1">Lade Mannschaftskasse...</p>
         </div>
-      )}
+      ) : isAppLocked ? (
+        <div className="fixed inset-0 z-[100] bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-slate-100 font-sans antialiased flex flex-col items-center justify-center p-4 overflow-hidden">
+          {/* Basketball and Pine Forest atmospheric gradients */}
+          <div className="absolute right-[-80px] top-[-80px] w-96 h-96 rounded-full bg-orange-600/10 blur-3xl pointer-events-none animate-pulse" />
+          <div className="absolute left-[15%] bottom-[-50px] w-72 h-72 rounded-full bg-emerald-600/5 blur-3xl pointer-events-none" />
+          <div className="absolute inset-0 bg-[linear-gradient(rgba(255,107,0,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,107,0,0.02)_1px,transparent_1px)] bg-[size:30px_30px] opacity-40 pointer-events-none" />
+
+          <div className="relative w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl p-8 shadow-2xl space-y-6 z-10 backdrop-blur-md">
+            <div className="flex flex-col items-center text-center space-y-4">
+              <div className="relative group">
+                <div className="absolute -inset-2 bg-gradient-to-r from-[#FF6B00] to-amber-500 rounded-2xl blur-md opacity-75 group-hover:opacity-100 transition duration-500 animate-pulse" />
+                <div className="relative w-20 h-20 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center p-1.5 shadow-2xl">
+                  <img 
+                    src="/icon.png" 
+                    alt="BFC Freiburg Logo" 
+                    className="w-full h-full object-contain" 
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] bg-[#FF6B00]/20 text-[#FF6B00] font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider border border-[#FF6B00]/30">
+                    Privater Bereich
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-extrabold px-2 py-0.5 rounded border border-emerald-500/20">EST. 2016</span>
+                </div>
+                <h2 className="text-xl font-extrabold text-white tracking-tight mt-2 font-sans">
+                  BFC Freiburg Kasse
+                </h2>
+                <p className="text-xs text-slate-400 mt-1 max-w-xs mx-auto font-medium">
+                  Diese Seite ist privat. Bitte gib das Spieler-Passwort oder den Trainer-PIN ein, um fortzufahren.
+                </p>
+              </div>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const lowerVal = appPasswordInput.trim();
+              if (lowerVal === 'Unter100') {
+                setIsAppLocked(false);
+                localStorage.setItem('bfc_app_unlocked', 'true');
+                setIsBookingAuthorized(true);
+              } else if (lowerVal === '2016') {
+                setIsAppLocked(false);
+                localStorage.setItem('bfc_app_unlocked', 'true');
+                setIsAdminMode(true);
+                setIsBookingAuthorized(true);
+              } else {
+                setAppPasswordError('Ungültiges Passwort oder PIN!');
+              }
+            }} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300 uppercase tracking-wider block">Passwort oder PIN</label>
+                <div className="relative">
+                  <input
+                    type="password"
+                    value={appPasswordInput}
+                    onChange={(e) => {
+                      setAppPasswordInput(e.target.value);
+                      setAppPasswordError('');
+                    }}
+                    placeholder="Spieler-Passwort oder Trainer-PIN"
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-2xl text-sm font-semibold text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#FF6B00] focus:border-transparent transition"
+                    autoFocus
+                  />
+                  <div className="absolute right-3.5 top-1/2 transform -translate-y-1/2 text-slate-500">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                </div>
+                {appPasswordError && (
+                  <p className="text-xs text-rose-500 font-medium animate-fade-in">{appPasswordError}</p>
+                )}
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-gradient-to-r from-[#FF6B00] to-amber-500 hover:from-[#e05e00] hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm transition shadow-lg shadow-orange-500/15 cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Unlock className="w-4 h-4" />
+                Bereich freischalten
+              </button>
+            </form>
+
+            <div className="pt-2 text-center border-t border-slate-800/50">
+              <p className="text-[10px] text-slate-500">
+                © BFC Freiburg e.V. • Nur zur internen Vereinsnutzung
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
       
       {/* HEADER BANNER */}
       <header className="relative bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 border-b border-[#FF6B00]/30 px-4 py-6 md:py-8 overflow-hidden shadow-lg text-white">
@@ -3028,6 +3128,8 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
 
     </div>

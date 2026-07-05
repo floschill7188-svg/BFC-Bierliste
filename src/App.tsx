@@ -1633,7 +1633,7 @@ export default function App() {
                   id="notification-planner-toggle-btn"
                 >
                   <Bell className="w-4 h-4 text-[#FF6B00]" />
-                  Meldungen & Sendepläne
+                  Erinnerungen
                 </button>
               </>
             )}

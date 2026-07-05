@@ -77,6 +77,14 @@ export interface PushSubscriptionData {
   userAgent: string;
 }
 
+export interface ScheduleRule {
+  id: string;
+  type: 'once' | 'repeating';
+  onceDateTime?: string; // "YYYY-MM-DDTHH:MM"
+  repeatingDay?: 'daily' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+  repeatingTime?: string; // "HH:MM"
+}
+
 export interface NotificationSchedule {
   id: string; // 'kontostand' or 'getraenke'
   title: string;
@@ -89,6 +97,7 @@ export interface NotificationSchedule {
   lastTriggered?: string; // ISO string of last trigger
   nextRunTime?: number | null; // millisecond timestamp of next run
   history?: string[]; // ISO strings of last 3 triggered times
+  rules?: ScheduleRule[];
 }
 
 

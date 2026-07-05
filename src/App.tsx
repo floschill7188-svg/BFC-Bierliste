@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule } from './types';
+import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule, ScheduleRule } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
 import { onSnapshot, collection, doc, setDoc, runTransaction, deleteDoc } from 'firebase/firestore';
@@ -46,7 +46,8 @@ import {
   Bell,
   BellOff,
   Volume2,
-  Trash2
+  Trash2,
+  Clock
 } from 'lucide-react';
 
 function cleanForFirestore<T extends object>(obj: T): T {
@@ -59,26 +60,42 @@ function cleanForFirestore<T extends object>(obj: T): T {
   return clean;
 }
 
-function calculateNextRunTime(schedule: NotificationSchedule): number | undefined {
-  if (!schedule.isActive) return undefined;
-  
-  if (schedule.type === 'once') {
-    if (!schedule.onceDateTime) return undefined;
-    const date = new Date(schedule.onceDateTime);
+function getScheduleRules(schedule: NotificationSchedule): ScheduleRule[] {
+  if (schedule.rules && schedule.rules.length > 0) {
+    return schedule.rules;
+  }
+  // Fallback to legacy fields
+  if (schedule.type) {
+    return [{
+      id: 'legacy-default',
+      type: schedule.type,
+      onceDateTime: schedule.onceDateTime || '',
+      repeatingDay: schedule.repeatingDay || 'sunday',
+      repeatingTime: schedule.repeatingTime || '18:00',
+    }];
+  }
+  return [];
+}
+
+function calculateRuleNextRunTime(rule: ScheduleRule, referenceTime: number = Date.now()): number | undefined {
+  if (rule.type === 'once') {
+    if (!rule.onceDateTime) return undefined;
+    const date = new Date(rule.onceDateTime);
     const ms = date.getTime();
-    return isNaN(ms) ? undefined : ms;
+    if (isNaN(ms)) return undefined;
+    return ms > referenceTime ? ms : undefined;
   }
   
-  if (schedule.type === 'repeating') {
-    if (!schedule.repeatingTime) return undefined;
-    const [hours, minutes] = schedule.repeatingTime.split(':').map(Number);
+  if (rule.type === 'repeating') {
+    if (!rule.repeatingTime) return undefined;
+    const [hours, minutes] = rule.repeatingTime.split(':').map(Number);
     if (isNaN(hours) || hours < 0 || hours > 23 || isNaN(minutes) || minutes < 0 || minutes > 59) return undefined;
     
-    const now = new Date();
-    const target = new Date();
+    const now = new Date(referenceTime);
+    const target = new Date(referenceTime);
     target.setHours(hours, minutes, 0, 0);
     
-    if (schedule.repeatingDay === 'daily') {
+    if (rule.repeatingDay === 'daily') {
       if (target.getTime() <= now.getTime()) {
         target.setDate(target.getDate() + 1);
       }
@@ -93,7 +110,7 @@ function calculateNextRunTime(schedule: NotificationSchedule): number | undefine
         friday: 5,
         saturday: 6
       };
-      const targetDay = dayMap[schedule.repeatingDay || 'sunday'];
+      const targetDay = dayMap[rule.repeatingDay || 'sunday'];
       const currentDay = now.getDay();
       
       let daysDiff = targetDay - currentDay;
@@ -111,67 +128,41 @@ function calculateNextRunTime(schedule: NotificationSchedule): number | undefine
   return undefined;
 }
 
-function calculateNextNRunTimes(schedule: NotificationSchedule, n: number): number[] {
-  if (!schedule.isActive) return [];
+function calculateNextRunTime(schedule: NotificationSchedule, referenceTime: number = Date.now()): number | undefined {
+  if (!schedule.isActive) return undefined;
+  const rules = getScheduleRules(schedule);
+  if (rules.length === 0) return undefined;
   
-  if (schedule.type === 'once') {
-    if (!schedule.onceDateTime) return [];
-    const date = new Date(schedule.onceDateTime);
-    const ms = date.getTime();
-    if (isNaN(ms)) return [];
-    return ms > Date.now() ? [ms] : [];
-  }
-  
-  if (schedule.type === 'repeating') {
-    if (!schedule.repeatingTime) return [];
-    const [hours, minutes] = schedule.repeatingTime.split(':').map(Number);
-    if (isNaN(hours) || hours < 0 || hours > 23 || isNaN(minutes) || minutes < 0 || minutes > 59) return [];
-    
-    const runs: number[] = [];
-    let referenceTime = Date.now();
-    
-    for (let i = 0; i < n; i++) {
-      const refDate = new Date(referenceTime);
-      const target = new Date(referenceTime);
-      target.setHours(hours, minutes, 0, 0);
-      
-      if (schedule.repeatingDay === 'daily') {
-        if (target.getTime() <= refDate.getTime()) {
-          target.setDate(target.getDate() + 1);
-        }
-        const runTime = target.getTime();
-        runs.push(runTime);
-        referenceTime = runTime + 1000;
-      } else {
-        const dayMap: { [key: string]: number } = {
-          sunday: 0,
-          monday: 1,
-          tuesday: 2,
-          wednesday: 3,
-          thursday: 4,
-          friday: 5,
-          saturday: 6
-        };
-        const targetDay = dayMap[schedule.repeatingDay || 'sunday'];
-        const currentDay = refDate.getDay();
-        
-        let daysDiff = targetDay - currentDay;
-        if (daysDiff < 0) {
-          daysDiff += 7;
-        } else if (daysDiff === 0) {
-          if (target.getTime() <= refDate.getTime()) {
-            daysDiff = 7;
-          }
-        }
-        target.setDate(target.getDate() + daysDiff);
-        const runTime = target.getTime();
-        runs.push(runTime);
-        referenceTime = runTime + 1000;
+  let earliest: number | undefined = undefined;
+  for (const rule of rules) {
+    const next = calculateRuleNextRunTime(rule, referenceTime);
+    if (next !== undefined) {
+      if (earliest === undefined || next < earliest) {
+        earliest = next;
       }
     }
-    return runs;
   }
-  return [];
+  return earliest;
+}
+
+function calculateNextNRunTimes(schedule: NotificationSchedule, n: number): number[] {
+  if (!schedule.isActive) return [];
+  const rules = getScheduleRules(schedule);
+  if (rules.length === 0) return [];
+  
+  const allRuns: number[] = [];
+  for (const rule of rules) {
+    let referenceTime = Date.now();
+    for (let i = 0; i < n; i++) {
+      const next = calculateRuleNextRunTime(rule, referenceTime);
+      if (next === undefined) break;
+      allRuns.push(next);
+      referenceTime = next + 1000;
+    }
+  }
+  
+  const uniqueRuns = Array.from(new Set(allRuns)).sort((a, b) => a - b);
+  return uniqueRuns.slice(0, n);
 }
 
 export default function App() {
@@ -640,15 +631,10 @@ export default function App() {
               const currentHistory = freshSchedule.history || [];
               updatedSchedule.history = [timestamp, ...currentHistory].slice(0, 3);
               
-              if (freshSchedule.type === 'once') {
+              const nextRunTime = calculateNextRunTime(freshSchedule, Date.now() + 5000);
+              updatedSchedule.nextRunTime = nextRunTime !== undefined ? nextRunTime : null;
+              if (nextRunTime === undefined) {
                 updatedSchedule.isActive = false;
-                updatedSchedule.nextRunTime = null;
-              } else {
-                const nextRunTime = calculateNextRunTime({
-                  ...freshSchedule,
-                  lastTriggered: updatedSchedule.lastTriggered
-                });
-                updatedSchedule.nextRunTime = nextRunTime !== undefined ? nextRunTime : null;
               }
               
               transaction.set(scheduleDocRef, cleanForFirestore(updatedSchedule));
@@ -1252,17 +1238,24 @@ export default function App() {
 
   const handleSaveSchedule = async (schedule: NotificationSchedule) => {
     try {
+      const rules = getScheduleRules(schedule);
+      const primaryRule = (rules[0] || { id: 'default', type: 'repeating', repeatingDay: 'sunday', repeatingTime: '18:00' }) as ScheduleRule;
       const nextRun = calculateNextRunTime(schedule);
       const updated = {
         ...schedule,
+        rules,
+        type: primaryRule.type,
+        onceDateTime: primaryRule.onceDateTime || '',
+        repeatingDay: primaryRule.repeatingDay || 'sunday',
+        repeatingTime: primaryRule.repeatingTime || '18:00',
         nextRunTime: nextRun || null
       };
       await setDoc(doc(db, 'schedules', schedule.id), cleanForFirestore(updated));
-      setNotifStatus({ text: `💾 Sendeplan für "${schedule.title}" erfolgreich gespeichert!`, isError: false });
+      setNotifStatus({ text: `💾 "${schedule.title}" erfolgreich gespeichert!`, isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
       console.error("Failed to save schedule:", err);
-      setNotifStatus({ text: "Fehler beim Speichern des Sendeplans.", isError: true });
+      setNotifStatus({ text: "Fehler beim Speichern der Erinnerung.", isError: true });
       setTimeout(() => setNotifStatus(null), 4000);
     }
   };
@@ -1279,27 +1272,35 @@ export default function App() {
         repeatingDay: 'sunday',
         repeatingTime: '18:00',
         onceDateTime: '',
+        rules: [
+          {
+            id: 'rule-' + Math.random().toString(36).substring(2, 9),
+            type: 'repeating',
+            repeatingDay: 'sunday',
+            repeatingTime: '18:00'
+          }
+        ],
         history: []
       };
       await setDoc(doc(db, 'schedules', newId), cleanForFirestore(newSchedule));
-      setNotifStatus({ text: "✨ Neuer Sendeplan wurde erfolgreich angelegt!", isError: false });
+      setNotifStatus({ text: "✨ Neue Erinnerung wurde erfolgreich angelegt!", isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
       console.error("Failed to add schedule:", err);
-      setNotifStatus({ text: "Fehler beim Erstellen des Sendeplans.", isError: true });
+      setNotifStatus({ text: "Fehler beim Erstellen der Erinnerung.", isError: true });
       setTimeout(() => setNotifStatus(null), 4000);
     }
   };
 
   const handleDeleteSchedule = async (id: string) => {
-    if (!window.confirm("Bist du sicher, dass du diesen Sendeplan löschen möchtest?")) return;
+    if (!window.confirm("Bist du sicher, dass du diese Erinnerung löschen möchtest?")) return;
     try {
       await deleteDoc(doc(db, 'schedules', id));
-      setNotifStatus({ text: "🗑️ Sendeplan wurde erfolgreich gelöscht!", isError: false });
+      setNotifStatus({ text: "🗑️ Erinnerung wurde erfolgreich gelöscht!", isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
       console.error("Failed to delete schedule:", err);
-      setNotifStatus({ text: "Fehler beim Löschen des Sendeplans.", isError: true });
+      setNotifStatus({ text: "Fehler beim Löschen der Erinnerung.", isError: true });
       setTimeout(() => setNotifStatus(null), 4000);
     }
   };
@@ -1710,10 +1711,10 @@ export default function App() {
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-unlock-btn-player"
-                title="Spieler PIN eingeben"
+                title="Spieler Log In"
               >
                 <Lock className="w-4 h-4 text-rose-600" />
-                <span>Spieler (Gesperrt)</span>
+                <span>Spieler (Log In)</span>
               </button>
             )}
 
@@ -1741,10 +1742,10 @@ export default function App() {
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
                 id="global-unlock-btn-trainer"
-                title="Trainer PIN eingeben"
+                title="Trainer Log In"
               >
                 <Lock className="w-4 h-4 text-rose-600" />
-                <span>Trainer (Gesperrt)</span>
+                <span>Trainer (Log In)</span>
               </button>
             )}
 
@@ -2315,7 +2316,7 @@ export default function App() {
                   <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 flex flex-col sm:flex-row justify-between items-center gap-3 text-xs text-emerald-800">
                     <div className="flex items-center gap-2">
                       <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span><strong>Admin-Modus aktiv:</strong> Du kannst nun Getränke-Preise ändern, neue Strafen hinzufügen und den Katalog verwalten.</span>
+                      <span><strong>Trainer-Bereich aktiv:</strong> Du kannst nun Getränke-Preise ändern, neue Strafen hinzufügen und den Katalog verwalten.</span>
                     </div>
                     <button
                       onClick={() => {
@@ -2325,7 +2326,7 @@ export default function App() {
                       }}
                       className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs shrink-0"
                     >
-                      Admin-Sitzung sperren
+                      Trainer-Sitzung beenden
                     </button>
                   </div>
                   <CatalogManager
@@ -2342,9 +2343,9 @@ export default function App() {
                     <Lock className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-800">🔒 Admin-Bereich: Katalog verwalten</h4>
+                    <h4 className="font-bold text-slate-800">🔒 Trainer-Bereich: Katalog verwalten</h4>
                     <p className="text-xs text-slate-500 mt-1">
-                      Der Getränke- und Strafenkatalog ist aktuell für Mitglieder gesperrt. Gib den Admin-PIN ein, um Einstellungen vorzunehmen.
+                      Der Getränke- und Strafenkatalog ist aktuell für Mitglieder gesperrt. Gib den Trainer-PIN ein, um Einstellungen vorzunehmen.
                     </p>
                   </div>
                   
@@ -2364,7 +2365,7 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row gap-2 justify-center">
                       <input
                         type="password"
-                        placeholder="Admin-PIN eingeben"
+                        placeholder="Trainer-PIN eingeben"
                         value={bottomPinInput}
                         onChange={(e) => setBottomPinInput(e.target.value)}
                         className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-[#FF6B00] shadow-2xs font-mono text-center flex-1"
@@ -2387,14 +2388,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal: Notification Planner & Sendepläne */}
+      {/* Modal: Notification Planner & Erinnerungen */}
       {isNotificationPlannerOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" id="notification-planner-modal">
           <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-4xl p-6 shadow-2xl max-h-[90vh] overflow-y-auto flex flex-col space-y-4">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3 shrink-0">
               <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
                 <Bell className="w-5 h-5 text-[#FF6B00]" />
-                Meldungen &amp; Sendepläne verwalten
+                Erinnerungen verwalten
               </h3>
               <button
                 onClick={() => setIsNotificationPlannerOpen(false)}
@@ -2415,11 +2416,11 @@ export default function App() {
               {isAdminMode ? (
                 <>
                   <div className="space-y-6">
-                    {/* Header of Sendepläne list */}
+                    {/* Header of Erinnerungen list */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-slate-100">
                       <div>
-                        <h4 className="font-bold text-slate-800 text-sm">Aktive Sendepläne ({schedules.length})</h4>
-                        <p className="text-[11px] text-slate-400">Erstelle beliebig viele einmalige oder wiederholende Sendepläne, die parallel laufen.</p>
+                        <h4 className="font-bold text-slate-800 text-sm">Aktive Erinnerungen ({schedules.length})</h4>
+                        <p className="text-[11px] text-slate-400">Erstelle beliebig viele einmalige oder wiederholende Erinnerungen, die parallel laufen.</p>
                       </div>
                       <button
                         type="button"
@@ -2427,25 +2428,26 @@ export default function App() {
                         className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-[#FF6B00] to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white rounded-xl text-xs font-black transition cursor-pointer shadow-xs active:scale-95 shrink-0"
                       >
                         <Plus className="w-4 h-4" />
-                        Sendeplan hinzufügen
+                        Erinnerung hinzufügen
                       </button>
                     </div>
 
                     {schedules.length === 0 ? (
                       <div className="text-center py-12 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                         <BellOff className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                        <p className="text-xs text-slate-500 font-medium">Bisher wurden keine Sendepläne erstellt.</p>
+                        <p className="text-xs text-slate-500 font-medium">Bisher wurden keine Erinnerungen erstellt.</p>
                         <button
                           type="button"
                           onClick={handleAddSchedule}
                           className="mt-3 text-xs text-[#FF6B00] font-bold hover:underline"
                         >
-                          Jetzt den ersten Sendeplan anlegen
+                          Jetzt die erste Erinnerung anlegen
                         </button>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
                         {schedules.map((sched) => {
+                          const rules = getScheduleRules(sched);
                           return (
                             <div key={sched.id} className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4 shadow-3xs hover:shadow-2xs transition flex flex-col justify-between">
                               <div className="space-y-4">
@@ -2459,9 +2461,9 @@ export default function App() {
                                         setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
                                       }}
                                       className="font-black text-slate-800 text-sm bg-transparent border-b border-transparent hover:border-slate-300 focus:border-[#FF6B00] focus:outline-none w-full pb-0.5"
-                                      placeholder="Sendeplan Titel..."
+                                      placeholder="Name der Erinnerung..."
                                     />
-                                    <p className="text-[11px] text-slate-400 mt-0.5">Sendeplan-ID: {sched.id}</p>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">Erinnerungs-ID: {sched.id}</p>
                                   </div>
                                   <div className="flex items-center gap-3 shrink-0">
                                     <label className="relative inline-flex items-center cursor-pointer">
@@ -2505,84 +2507,130 @@ export default function App() {
                                   />
                                 </div>
 
-                                {/* Schedule Planner */}
+                                {/* Dynamic Rules Configurator */}
                                 <div className="space-y-3 p-3.5 border border-slate-100 rounded-xl bg-white">
-                                  <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                                    <Settings className="w-3.5 h-3.5 text-[#FF6B00]" />
-                                    Sendeplan konfigurieren
-                                  </h5>
-
-                                  <div className="grid grid-cols-2 gap-2">
+                                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                                    <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
+                                      <Clock className="w-3.5 h-3.5 text-[#FF6B00]" />
+                                      Sendezeiten / Pläne ({rules.length})
+                                    </h5>
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        const updated = { ...sched, type: 'once' as const };
+                                        const newRule = {
+                                          id: 'rule-' + Math.random().toString(36).substring(2, 9),
+                                          type: 'repeating' as const,
+                                          repeatingDay: 'daily' as const,
+                                          repeatingTime: '18:00'
+                                        };
+                                        const updated = {
+                                          ...sched,
+                                          rules: [...rules, newRule]
+                                        };
                                         setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
                                       }}
-                                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'once' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+                                      className="flex items-center gap-1 text-[10px] font-bold text-[#FF6B00] hover:text-orange-600 transition cursor-pointer"
                                     >
-                                      Einmalig
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const updated = { ...sched, type: 'repeating' as const };
-                                        setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
-                                      }}
-                                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'repeating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                                    >
-                                      Wiederholend
+                                      <Plus className="w-3 h-3" />
+                                      Zeit hinzufügen
                                     </button>
                                   </div>
 
-                                  {sched.type === 'once' ? (
-                                    <div className="space-y-1">
-                                      <label className="block text-[10px] font-bold text-slate-400">Datum &amp; Uhrzeit</label>
-                                      <input 
-                                        type="datetime-local" 
-                                        value={sched.onceDateTime || ''}
-                                        onChange={(e) => {
-                                          const updated = { ...sched, onceDateTime: e.target.value };
-                                          setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
-                                        }}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
-                                      />
-                                    </div>
+                                  {rules.length === 0 ? (
+                                    <p className="text-[11px] text-slate-400 italic text-center py-2">Keine Sendezeiten konfiguriert. Füge eine Sendezeit hinzu.</p>
                                   ) : (
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <div className="space-y-1">
-                                        <label className="block text-[10px] font-bold text-slate-400">Wochentag</label>
-                                        <select
-                                          value={sched.repeatingDay || 'sunday'}
-                                          onChange={(e) => {
-                                            const updated = { ...sched, repeatingDay: e.target.value as any };
-                                            setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
-                                          }}
-                                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"
-                                        >
-                                          <option value="daily">Täglich</option>
-                                          <option value="monday">Montag</option>
-                                          <option value="tuesday">Dienstag</option>
-                                          <option value="wednesday">Mittwoch</option>
-                                          <option value="thursday">Donnerstag</option>
-                                          <option value="friday">Freitag</option>
-                                          <option value="saturday">Samstag</option>
-                                          <option value="sunday">Sonntag</option>
-                                        </select>
-                                      </div>
-                                      <div className="space-y-1">
-                                        <label className="block text-[10px] font-bold text-slate-400">Uhrzeit</label>
-                                        <input 
-                                          type="time" 
-                                          value={sched.repeatingTime || '18:00'}
-                                          onChange={(e) => {
-                                            const updated = { ...sched, repeatingTime: e.target.value };
-                                            setSchedules(schedules.map(s => s.id === sched.id ? updated : s));
-                                          }}
-                                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
-                                          required
-                                        />
-                                      </div>
+                                    <div className="space-y-3 divide-y divide-slate-100">
+                                      {rules.map((rule, idx) => (
+                                        <div key={rule.id} className={`pt-2.5 ${idx === 0 ? 'pt-0' : 'pt-2.5'} space-y-2`}>
+                                          <div className="flex justify-between items-center gap-2">
+                                            <span className="text-[10px] font-black text-slate-400">Zeitplan #{idx + 1}</span>
+                                            <div className="flex gap-1 shrink-0 bg-slate-100 p-0.5 rounded-lg">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const updatedRules = rules.map(r => r.id === rule.id ? { ...r, type: 'once' as const, onceDateTime: r.onceDateTime || new Date().toISOString().slice(0, 16) } : r);
+                                                  setSchedules(schedules.map(s => s.id === sched.id ? { ...s, rules: updatedRules } : s));
+                                                }}
+                                                className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer ${rule.type === 'once' ? 'bg-white text-slate-800 shadow-3xs' : 'text-slate-500 hover:text-slate-700'}`}
+                                              >
+                                                Einmalig
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  const updatedRules = rules.map(r => r.id === rule.id ? { ...r, type: 'repeating' as const, repeatingDay: r.repeatingDay || 'daily', repeatingTime: r.repeatingTime || '18:00' } : r);
+                                                  setSchedules(schedules.map(s => s.id === sched.id ? { ...s, rules: updatedRules } : s));
+                                                }}
+                                                className={`px-2 py-0.5 rounded text-[9px] font-bold transition cursor-pointer ${rule.type === 'repeating' ? 'bg-white text-slate-800 shadow-3xs' : 'text-slate-500 hover:text-slate-700'}`}
+                                              >
+                                                Wiederholend
+                                              </button>
+                                            </div>
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                const updatedRules = rules.filter(r => r.id !== rule.id);
+                                                setSchedules(schedules.map(s => s.id === sched.id ? { ...s, rules: updatedRules } : s));
+                                              }}
+                                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                                              title="Zeitplan löschen"
+                                            >
+                                              <Trash2 className="w-3.5 h-3.5" />
+                                            </button>
+                                          </div>
+
+                                          {rule.type === 'once' ? (
+                                            <div className="space-y-1">
+                                              <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Datum &amp; Uhrzeit</label>
+                                              <input 
+                                                type="datetime-local" 
+                                                value={rule.onceDateTime || ''}
+                                                onChange={(e) => {
+                                                  const updatedRules = rules.map(r => r.id === rule.id ? { ...r, onceDateTime: e.target.value } : r);
+                                                  setSchedules(schedules.map(s => s.id === sched.id ? { ...s, rules: updatedRules } : s));
+                                                }}
+                                                className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                              />
+                                            </div>
+                                          ) : (
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <div className="space-y-1">
+                                                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Intervall / Wochentag</label>
+                                                <select
+                                                  value={rule.repeatingDay || 'daily'}
+                                                  onChange={(e) => {
+                                                    const updatedRules = rules.map(r => r.id === rule.id ? { ...r, repeatingDay: e.target.value as any } : r);
+                                                    setSchedules(schedules.map(s => s.id === sched.id ? { ...s, rules: updatedRules } : s));
+                                                  }}
+                                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:border-[#FF6B00]"
+                                                >
+                                                  <option value="daily">Täglich</option>
+                                                  <option value="monday">Montag</option>
+                                                  <option value="tuesday">Dienstag</option>
+                                                  <option value="wednesday">Mittwoch</option>
+                                                  <option value="thursday">Donnerstag</option>
+                                                  <option value="friday">Freitag</option>
+                                                  <option value="saturday">Samstag</option>
+                                                  <option value="sunday">Sonntag</option>
+                                                </select>
+                                              </div>
+                                              <div className="space-y-1">
+                                                <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">Uhrzeit</label>
+                                                <input 
+                                                  type="time" 
+                                                  value={rule.repeatingTime || '18:00'}
+                                                  onChange={(e) => {
+                                                    const updatedRules = rules.map(r => r.id === rule.id ? { ...r, repeatingTime: e.target.value } : r);
+                                                    setSchedules(schedules.map(s => s.id === sched.id ? { ...s, rules: updatedRules } : s));
+                                                  }}
+                                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
+                                                  required
+                                                />
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
                                     </div>
                                   )}
                                 </div>
@@ -2629,7 +2677,7 @@ export default function App() {
                                               if (nextRuns.length === 0) {
                                                 return (
                                                   <tr>
-                                                    <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht active / geplant</td>
+                                                    <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht aktiv / geplant</td>
                                                   </tr>
                                                 );
                                               }
@@ -2680,459 +2728,6 @@ export default function App() {
                       </div>
                     )}
                   </div>
-                  {false && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                      {/* Card 1: Kontostand */}
-                  {(() => {
-                    const sched = schedules.find(s => s.id === 'kontostand') || {
-                      id: 'kontostand',
-                      title: 'Aktueller Kontostand 📊',
-                      defaultBody: 'Bitte überprüfe deinen Kontostand in der App und zahle ausstehende Beträge ein. Jede Kasse zählt!',
-                      isActive: false,
-                      type: 'once',
-                      onceDateTime: '',
-                      repeatingDay: 'sunday',
-                      repeatingTime: '18:00'
-                    };
-                    
-                    return (
-                      <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4 shadow-3xs hover:shadow-2xs transition flex flex-col justify-between">
-                        <div className="space-y-4">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="font-black text-slate-800 text-sm">1. Kontostand-Erinnerung</h4>
-                              <p className="text-[11px] text-slate-400">Erinnert Spieler an ihren offenen Saldo</p>
-                            </div>
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={sched.isActive} 
-                                onChange={(e) => {
-                                  const updated = { ...sched, isActive: e.target.checked };
-                                  handleSaveSchedule(updated);
-                                }}
-                                className="sr-only peer" 
-                              />
-                              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                              <span className="ml-2 text-[10px] font-bold text-slate-500">{sched.isActive ? 'Aktiv' : 'Inaktiv'}</span>
-                            </label>
-                          </div>
-
-                          {/* Message Editor */}
-                          <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Betreff / Titel</label>
-                            <input 
-                              type="text" 
-                              value={sched.title} 
-                              onChange={(e) => {
-                                const updated = { ...sched, title: e.target.value };
-                                setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                              }}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]" 
-                            />
-
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">Meldungstext</label>
-                            <textarea 
-                              value={sched.defaultBody} 
-                              rows={3}
-                              onChange={(e) => {
-                                const updated = { ...sched, defaultBody: e.target.value };
-                                setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                              }}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] resize-none" 
-                            />
-                          </div>
-
-                          {/* Schedule Planner */}
-                          <div className="space-y-3 p-3.5 border border-slate-100 rounded-xl bg-white">
-                            <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                              <Settings className="w-3.5 h-3.5 text-[#FF6B00]" />
-                              Sendeplan konfigurieren
-                            </h5>
-
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = { ...sched, type: 'once' as const };
-                                  setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'once' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                              >
-                                Einmalig
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = { ...sched, type: 'repeating' as const };
-                                  setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'repeating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                              >
-                                Wiederholend
-                              </button>
-                            </div>
-
-                            {sched.type === 'once' ? (
-                              <div className="space-y-1">
-                                <label className="block text-[10px] font-bold text-slate-400">Datum &amp; Uhrzeit</label>
-                                <input 
-                                  type="datetime-local" 
-                                  value={sched.onceDateTime || ''}
-                                  onChange={(e) => {
-                                    const updated = { ...sched, onceDateTime: e.target.value };
-                                    setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                                  }}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
-                                />
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="space-y-1">
-                                  <label className="block text-[10px] font-bold text-slate-400">Wochentag</label>
-                                  <select
-                                    value={sched.repeatingDay || 'sunday'}
-                                    onChange={(e) => {
-                                      const updated = { ...sched, repeatingDay: e.target.value as any };
-                                      setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                                    }}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"
-                                  >
-                                    <option value="daily">Täglich</option>
-                                    <option value="monday">Montag</option>
-                                    <option value="tuesday">Dienstag</option>
-                                    <option value="wednesday">Mittwoch</option>
-                                    <option value="thursday">Donnerstag</option>
-                                    <option value="friday">Freitag</option>
-                                    <option value="saturday">Samstag</option>
-                                    <option value="sunday">Sonntag</option>
-                                  </select>
-                                </div>
-                                <div className="space-y-1">
-                                  <label className="block text-[10px] font-bold text-slate-400">Uhrzeit</label>
-                                  <input 
-                                    type="time" 
-                                    value={sched.repeatingTime || '18:00'}
-                                    onChange={(e) => {
-                                      const updated = { ...sched, repeatingTime: e.target.value };
-                                      setSchedules(schedules.map(s => s.id === 'kontostand' ? updated : s));
-                                    }}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
-                                  />
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Tabular History & Next Runs */}
-                            <div className="pt-3 border-t border-slate-100 space-y-3">
-                              <div className="grid grid-cols-2 gap-4">
-                                {/* Letzte 3 Läufe */}
-                                <div className="space-y-1.5">
-                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Letzte 3 Läufe</span>
-                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
-                                    <table className="w-full text-[10px]">
-                                      <tbody>
-                                        {(() => {
-                                          const hist = sched.history || (sched.lastTriggered ? [sched.lastTriggered] : []);
-                                          if (hist.length === 0) {
-                                            return (
-                                              <tr>
-                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Bisher keine Läufe</td>
-                                              </tr>
-                                            );
-                                          }
-                                          return hist.map((timeStr, idx) => (
-                                            <tr key={idx} className={idx < hist.length - 1 ? "border-b border-slate-100" : ""}>
-                                              <td className="px-2.5 py-1.5 font-mono text-slate-600 text-left">
-                                                {idx + 1}. {new Date(timeStr).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
-                                              </td>
-                                            </tr>
-                                          ));
-                                        })()}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-
-                                {/* Nächste 3 Versandläufe */}
-                                <div className="space-y-1.5">
-                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Nächste 3 Läufe</span>
-                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
-                                    <table className="w-full text-[10px]">
-                                      <tbody>
-                                        {(() => {
-                                          const nextRuns = calculateNextNRunTimes(sched, 3);
-                                          if (nextRuns.length === 0) {
-                                            return (
-                                              <tr>
-                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht aktiv / geplant</td>
-                                              </tr>
-                                            );
-                                          }
-                                          return nextRuns.map((timestamp, idx) => (
-                                            <tr key={idx} className={idx < nextRuns.length - 1 ? "border-b border-slate-100" : ""}>
-                                              <td className="px-2.5 py-1.5 font-mono text-emerald-600 font-bold text-left">
-                                                {idx + 1}. {new Date(timestamp).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
-                                              </td>
-                                            </tr>
-                                          ));
-                                        })()}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-2 pt-4 border-t border-slate-100 mt-4">
-                          <button
-                            type="button"
-                            onClick={() => handleSendNow('kontostand', sched.title, sched.defaultBody)}
-                            className="flex-1 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl text-xs transition cursor-pointer text-center"
-                          >
-                            Jetzt senden 📣
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSaveSchedule(sched)}
-                            className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center"
-                          >
-                            Plan speichern 💾
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Card 2: Getränke nachtragen */}
-                  {(() => {
-                    const sched = schedules.find(s => s.id === 'getraenke') || {
-                      id: 'getraenke',
-                      title: 'Getränke nachtragen! 🍻',
-                      defaultBody: 'Denkt bitte daran, alle eure konsumierten Getränke der letzten Tage ordnungsgemäß nachzutragen!',
-                      isActive: false,
-                      type: 'once',
-                      onceDateTime: '',
-                      repeatingDay: 'sunday',
-                      repeatingTime: '18:00'
-                    };
-                    
-                    return (
-                      <div className="border border-slate-200 rounded-2xl p-5 bg-white space-y-4 shadow-3xs hover:shadow-2xs transition flex flex-col justify-between">
-                        <div className="space-y-4">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <h4 className="font-black text-slate-800 text-sm">2. Getränke-Nachzutragen-Erinnerung</h4>
-                              <p className="text-[11px] text-slate-400">Erinnert Spieler an Getränkeeintragung</p>
-                            </div>
-                            <label className="relative inline-flex items-center cursor-pointer">
-                              <input 
-                                type="checkbox" 
-                                checked={sched.isActive} 
-                                onChange={(e) => {
-                                  const updated = { ...sched, isActive: e.target.checked };
-                                  handleSaveSchedule(updated);
-                                }}
-                                className="sr-only peer" 
-                              />
-                              <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
-                              <span className="ml-2 text-[10px] font-bold text-slate-500">{sched.isActive ? 'Aktiv' : 'Inaktiv'}</span>
-                            </label>
-                          </div>
-
-                          {/* Message Editor */}
-                          <div className="space-y-2 bg-slate-50 p-3.5 rounded-xl border border-slate-100">
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Betreff / Titel</label>
-                            <input 
-                              type="text" 
-                              value={sched.title} 
-                              onChange={(e) => {
-                                const updated = { ...sched, title: e.target.value };
-                                setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                              }}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]" 
-                            />
-
-                            <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-2">Meldungstext</label>
-                            <textarea 
-                              value={sched.defaultBody} 
-                              rows={3}
-                              onChange={(e) => {
-                                const updated = { ...sched, defaultBody: e.target.value };
-                                setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                              }}
-                              className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] resize-none" 
-                            />
-                          </div>
-
-                          {/* Schedule Planner */}
-                          <div className="space-y-3 p-3.5 border border-slate-100 rounded-xl bg-white">
-                            <h5 className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                              <Settings className="w-3.5 h-3.5 text-[#FF6B00]" />
-                              Sendeplan konfigurieren
-                            </h5>
-
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = { ...sched, type: 'once' as const };
-                                  setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'once' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                              >
-                                Einmalig
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = { ...sched, type: 'repeating' as const };
-                                  setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                                }}
-                                className={`px-3 py-1.5 rounded-lg text-[11px] font-bold transition border ${sched.type === 'repeating' ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
-                              >
-                                Wiederholend
-                              </button>
-                            </div>
-
-                            {sched.type === 'once' ? (
-                              <div className="space-y-1">
-                                <label className="block text-[10px] font-bold text-slate-400">Datum &amp; Uhrzeit</label>
-                                <input 
-                                  type="datetime-local" 
-                                  value={sched.onceDateTime || ''}
-                                  onChange={(e) => {
-                                    const updated = { ...sched, onceDateTime: e.target.value };
-                                    setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                                  }}
-                                  className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
-                                />
-                              </div>
-                            ) : (
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="space-y-1">
-                                  <label className="block text-[10px] font-bold text-slate-400">Wochentag</label>
-                                  <select
-                                    value={sched.repeatingDay || 'sunday'}
-                                    onChange={(e) => {
-                                      const updated = { ...sched, repeatingDay: e.target.value as any };
-                                      setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                                    }}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00]"
-                                  >
-                                    <option value="daily">Täglich</option>
-                                    <option value="monday">Montag</option>
-                                    <option value="tuesday">Dienstag</option>
-                                    <option value="wednesday">Mittwoch</option>
-                                    <option value="thursday">Donnerstag</option>
-                                    <option value="friday">Freitag</option>
-                                    <option value="saturday">Samstag</option>
-                                    <option value="sunday">Sonntag</option>
-                                  </select>
-                                </div>
-                                <div className="space-y-1">
-                                  <label className="block text-[10px] font-bold text-slate-400">Uhrzeit</label>
-                                  <input 
-                                    type="time" 
-                                    value={sched.repeatingTime || '18:00'}
-                                    onChange={(e) => {
-                                      const updated = { ...sched, repeatingTime: e.target.value };
-                                      setSchedules(schedules.map(s => s.id === 'getraenke' ? updated : s));
-                                    }}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-[#FF6B00] font-mono" 
-                                  />
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Tabular History & Next Runs */}
-                            <div className="pt-3 border-t border-slate-100 space-y-3">
-                              <div className="grid grid-cols-2 gap-4">
-                                {/* Letzte 3 Läufe */}
-                                <div className="space-y-1.5">
-                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Letzte 3 Läufe</span>
-                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
-                                    <table className="w-full text-[10px]">
-                                      <tbody>
-                                        {(() => {
-                                          const hist = sched.history || (sched.lastTriggered ? [sched.lastTriggered] : []);
-                                          if (hist.length === 0) {
-                                            return (
-                                              <tr>
-                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Bisher keine Läufe</td>
-                                              </tr>
-                                            );
-                                          }
-                                          return hist.map((timeStr, idx) => (
-                                            <tr key={idx} className={idx < hist.length - 1 ? "border-b border-slate-100" : ""}>
-                                              <td className="px-2.5 py-1.5 font-mono text-slate-600 text-left">
-                                                {idx + 1}. {new Date(timeStr).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
-                                              </td>
-                                            </tr>
-                                          ));
-                                        })()}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-
-                                {/* Nächste 3 Versandläufe */}
-                                <div className="space-y-1.5">
-                                  <span className="block text-[9px] text-slate-400 uppercase font-black tracking-wider">Nächste 3 Läufe</span>
-                                  <div className="bg-slate-50 border border-slate-100 rounded-lg overflow-hidden">
-                                    <table className="w-full text-[10px]">
-                                      <tbody>
-                                        {(() => {
-                                          const nextRuns = calculateNextNRunTimes(sched, 3);
-                                          if (nextRuns.length === 0) {
-                                            return (
-                                              <tr>
-                                                <td className="px-2 py-1.5 text-slate-400 italic text-center">Nicht aktiv / geplant</td>
-                                              </tr>
-                                            );
-                                          }
-                                          return nextRuns.map((timestamp, idx) => (
-                                            <tr key={idx} className={idx < nextRuns.length - 1 ? "border-b border-slate-100" : ""}>
-                                              <td className="px-2.5 py-1.5 font-mono text-emerald-600 font-bold text-left">
-                                                {idx + 1}. {new Date(timestamp).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}
-                                              </td>
-                                            </tr>
-                                          ));
-                                        })()}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-2 pt-4 border-t border-slate-100 mt-4">
-                          <button
-                            type="button"
-                            onClick={() => handleSendNow('getraenke', sched.title, sched.defaultBody)}
-                            className="flex-1 px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-xl text-xs transition cursor-pointer text-center"
-                          >
-                            Jetzt senden 📣
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleSaveSchedule(sched)}
-                            className="flex-1 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs transition cursor-pointer text-center"
-                          >
-                            Plan speichern 💾
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-                )}
                 </>
               ) : (
                 <div className="bg-slate-50 border border-slate-200 rounded-3xl p-8 text-center max-w-xl mx-auto space-y-4 shadow-3xs my-8 animate-fade-in">
@@ -3140,9 +2735,9 @@ export default function App() {
                     <Lock className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-800">🔒 Admin-Bereich: Meldungen &amp; Sendepläne</h4>
+                    <h4 className="font-bold text-slate-800">🔒 Trainer-Bereich: Erinnerungen</h4>
                     <p className="text-xs text-slate-500 mt-1">
-                      Meldungen und Sendepläne können nur von Administratoren konfiguriert werden. Gib den Admin-PIN ein, um fortzufahren.
+                      Erinnerungen können nur von Trainern konfiguriert werden. Gib den Trainer-PIN ein, um fortzufahren.
                     </p>
                   </div>
                   
@@ -3162,7 +2757,7 @@ export default function App() {
                     <div className="flex flex-col sm:flex-row gap-2 justify-center">
                       <input
                         type="password"
-                        placeholder="Admin-PIN eingeben"
+                        placeholder="Trainer-PIN eingeben"
                         value={bottomPinInput}
                         onChange={(e) => setBottomPinInput(e.target.value)}
                         className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-[#FF6B00] shadow-2xs font-mono text-center flex-1"

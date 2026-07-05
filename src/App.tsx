@@ -1677,13 +1677,11 @@ export default function App() {
         <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-slate-950/98 backdrop-blur-md animate-fade-in">
           <div className="relative group mb-6">
             <div className="absolute -inset-4 bg-gradient-to-r from-[#FF6B00] via-amber-500 to-emerald-600 rounded-full blur-xl opacity-75 animate-pulse" />
-            <div className="relative w-24 h-24 bg-slate-900 border-2 border-slate-800 rounded-3xl flex items-center justify-center p-2 shadow-2xl animate-bounce">
-              <img 
-                src="/icon.png" 
-                alt="BFC Freiburg Logo" 
-                className="w-full h-full object-contain" 
-                referrerPolicy="no-referrer"
-              />
+            <div className="relative w-24 h-24 bg-gradient-to-br from-[#FF6B00] to-amber-500 rounded-3xl flex items-center justify-center p-2 shadow-2xl animate-bounce">
+              <div className="relative w-full h-full flex items-center justify-center">
+                <Dribbble className="w-14 h-14 animate-spin-slow text-white" />
+                <Coins className="w-9 h-9 text-yellow-300 absolute -bottom-1 -right-1 drop-shadow-md" />
+              </div>
             </div>
           </div>
           <p className="text-base font-bold text-slate-200 tracking-wide">BFC Freiburg e.V.</p>
@@ -1700,13 +1698,11 @@ export default function App() {
             <div className="flex flex-col items-center text-center space-y-4">
               <div className="relative group">
                 <div className="absolute -inset-2 bg-gradient-to-r from-[#FF6B00] to-amber-500 rounded-2xl blur-md opacity-75 group-hover:opacity-100 transition duration-500 animate-pulse" />
-                <div className="relative w-20 h-20 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-center p-1.5 shadow-2xl">
-                  <img 
-                    src="/icon.png" 
-                    alt="BFC Freiburg Logo" 
-                    className="w-full h-full object-contain" 
-                    referrerPolicy="no-referrer"
-                  />
+                <div className="relative w-20 h-20 bg-gradient-to-br from-[#FF6B00] to-amber-500 rounded-2xl flex items-center justify-center p-1.5 shadow-2xl">
+                  <div className="relative w-full h-full flex items-center justify-center">
+                    <Dribbble className="w-11 h-11 animate-spin-slow text-white" />
+                    <Coins className="w-7 h-7 text-yellow-300 absolute -bottom-1 -right-1 drop-shadow-md" />
+                  </div>
                 </div>
               </div>
               <div>
@@ -1714,7 +1710,6 @@ export default function App() {
                   <span className="text-[10px] bg-[#FF6B00]/20 text-[#FF6B00] font-extrabold uppercase px-2 py-0.5 rounded-full tracking-wider border border-[#FF6B00]/30">
                     Privater Bereich
                   </span>
-                  <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-extrabold px-2 py-0.5 rounded border border-emerald-500/20">EST. 2016</span>
                 </div>
                 <h2 className="text-xl font-extrabold text-white tracking-tight mt-2 font-sans">
                   BFC Freiburg Kasse
@@ -1798,13 +1793,11 @@ export default function App() {
             {/* Real Logo Badge */}
             <div className="relative group shrink-0">
               <div className="absolute -inset-1.5 bg-gradient-to-r from-[#FF6B00] to-amber-500 rounded-2xl blur-md opacity-75 group-hover:opacity-100 transition duration-500 animate-pulse" />
-              <div className="relative w-16 h-16 sm:w-20 sm:h-20 bg-slate-950 border-2 border-slate-800 rounded-2xl flex items-center justify-center p-1 shadow-2xl transition duration-300 transform group-hover:scale-105 group-hover:rotate-1">
-                <img 
-                  src="/icon.png" 
-                  alt="BFC Freiburg Logo" 
-                  className="w-full h-full object-contain" 
-                  referrerPolicy="no-referrer"
-                />
+              <div className="relative w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-[#FF6B00] to-amber-500 rounded-2xl flex items-center justify-center p-1 shadow-2xl transition duration-300 transform group-hover:scale-105 group-hover:rotate-1">
+                <div className="relative w-full h-full flex items-center justify-center">
+                  <Dribbble className="w-10 h-10 sm:w-12 sm:h-12 animate-spin-slow text-white" />
+                  <Coins className="w-6 h-6 sm:w-7 sm:h-7 text-yellow-300 absolute -bottom-1 -right-1 drop-shadow-md" />
+                </div>
               </div>
             </div>
             <div>
@@ -1813,7 +1806,6 @@ export default function App() {
                   Mannschafts-Kasse
                 </span>
                 <span className="text-xs text-slate-400 font-medium">• BFC Freiburg e.V.</span>
-                <span className="text-[10px] bg-emerald-500/15 text-emerald-400 font-extrabold px-2 py-0.5 rounded border border-emerald-500/20">EST. 2016</span>
               </div>
               <h1 className="text-2xl md:text-3.5xl font-black text-white tracking-tight mt-1.5 flex items-center gap-2">
                 BFC Freiburg Mannschaftskasse

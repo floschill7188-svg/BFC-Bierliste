@@ -21,6 +21,7 @@ interface ExpenseModalProps {
   onAddExpense: (expense: Omit<Expense, 'id'>) => void;
   onDeleteExpense: (id: string) => void;
   totalPaid: number;
+  manualCashAdjustment?: number;
   isAdminMode: boolean;
   setIsAdminMode: (isAdmin: boolean) => void;
 }
@@ -32,6 +33,7 @@ export default function ExpenseModal({
   onAddExpense,
   onDeleteExpense,
   totalPaid,
+  manualCashAdjustment = 0,
   isAdminMode,
   setIsAdminMode
 }: ExpenseModalProps) {
@@ -49,7 +51,7 @@ export default function ExpenseModal({
   if (!isOpen) return null;
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const netCash = totalPaid - totalExpenses;
+  const netCash = totalPaid - totalExpenses + manualCashAdjustment;
 
   const handleAdminToggle = () => {
     if (isAdminMode) {

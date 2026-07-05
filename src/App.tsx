@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule, ScheduleRule } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
 import PlayerCard from './components/PlayerCard';
-import { onSnapshot, collection, doc, setDoc, runTransaction, deleteDoc } from 'firebase/firestore';
+import { onSnapshot, collection, doc, setDoc, runTransaction, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db, initAuth } from './firebase';
 import { 
   isDatabaseEmpty, 
@@ -47,7 +47,9 @@ import {
   BellOff,
   Volume2,
   Trash2,
-  Clock
+  Clock,
+  Edit2,
+  Save
 } from 'lucide-react';
 
 function cleanForFirestore<T extends object>(obj: T): T {
@@ -173,6 +175,10 @@ export default function App() {
   const [fines, setFines] = useState<Fine[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [manualCashAdjustment, setManualCashAdjustment] = useState<number>(0);
+  const [isEditingCashBalance, setIsEditingCashBalance] = useState(false);
+  const [editCashBalanceValue, setEditCashBalanceValue] = useState('');
+  const [isResetDbModalOpen, setIsResetDbModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isCatalogOpen, setIsCatalogOpen] = useState(false);
@@ -347,8 +353,20 @@ export default function App() {
     let unsubExpenses: () => void;
     let unsubSchedules: () => void;
     let unsubAnnouncements: () => void;
+    let unsubSettings: () => void;
 
     const setupSubscriptions = () => {
+      unsubSettings = onSnapshot(doc(db, 'settings', 'app'), (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (typeof data.manualCashAdjustment === 'number') {
+            setManualCashAdjustment(data.manualCashAdjustment);
+          }
+        }
+      }, (err) => {
+        console.error("Failed to load settings: ", err);
+      });
+
       unsubPlayers = onSnapshot(collection(db, 'players'), (snapshot) => {
         const playersList: Player[] = [];
         snapshot.forEach((doc) => {
@@ -572,6 +590,7 @@ export default function App() {
       if (unsubExpenses) unsubExpenses();
       if (unsubSchedules) unsubSchedules();
       if (unsubAnnouncements) unsubAnnouncements();
+      if (unsubSettings) unsubSettings();
     };
   }, []);
 
@@ -1441,9 +1460,82 @@ export default function App() {
     saveState(players, drinks, updatedFines, transactions);
   };
 
+  // Save manual cash adjustment
+  const handleSaveManualCashAdjustment = async (targetValueStr: string) => {
+    const cleaned = targetValueStr.replace(/[^\d.,-]/g, '').replace(',', '.');
+    const numericValue = parseFloat(cleaned);
+    if (isNaN(numericValue)) return;
+    
+    const calculatedKassenbestand = stats.totalPaid - stats.totalExpenses;
+    const newAdjustment = numericValue - calculatedKassenbestand;
+    
+    try {
+      await setDoc(doc(db, 'settings', 'app'), { manualCashAdjustment: newAdjustment }, { merge: true });
+      setManualCashAdjustment(newAdjustment);
+      setIsEditingCashBalance(false);
+    } catch (e) {
+      console.error("Failed to save manual cash adjustment:", e);
+      alert("Fehler beim Speichern der Kassenkorrektur.");
+    }
+  };
+
   // Reset entire catalog to default values
   const handleResetCatalogToDefaults = () => {
     saveState(players, DEFAULT_DRINKS, DEFAULT_FINES, transactions);
+  };
+
+  // Wipe all database balances and delete all transactions/expenses (Blank start)
+  const handleWipeDatabase = async () => {
+    setIsFirebaseLoading(true);
+    try {
+      // 1. Get all transactions and delete them
+      const txSnap = await getDocs(collection(db, 'transactions'));
+      const batch = writeBatch(db);
+      txSnap.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      // 2. Get all expenses and delete them
+      const expSnap = await getDocs(collection(db, 'expenses'));
+      expSnap.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+
+      // 3. Reset all players to empty drinksCount, finesCount, and totalPaid
+      const playerSnap = await getDocs(collection(db, 'players'));
+      playerSnap.forEach((doc) => {
+        const pData = doc.data() as Player;
+        batch.set(doc.ref, {
+          ...pData,
+          drinksCount: {},
+          finesCount: {},
+          totalPaid: 0
+        });
+      });
+
+      // 4. Reset settings manualCashAdjustment to 0
+      batch.set(doc(db, 'settings', 'app'), { manualCashAdjustment: 0 }, { merge: true });
+
+      await batch.commit();
+      
+      // Update local state just in case snapshot takes a moment
+      setTransactions([]);
+      setExpenses([]);
+      setPlayers(prev => prev.map(p => ({
+        ...p,
+        drinksCount: {},
+        finesCount: {},
+        totalPaid: 0
+      })));
+      setManualCashAdjustment(0);
+      setIsResetDbModalOpen(false);
+      alert("Erfolgreich zurückgesetzt! Alle Kontostände wurden genullt, Transaktionen & Ausgaben gelöscht.");
+    } catch (error) {
+      console.error("Failed to wipe database:", error);
+      alert("Fehler beim Zurücksetzen der Datenbank: " + error);
+    } finally {
+      setIsFirebaseLoading(false);
+    }
   };
 
   // Calculate individual player balance
@@ -1634,6 +1726,14 @@ export default function App() {
                 >
                   <Bell className="w-4 h-4 text-[#FF6B00]" />
                   Erinnerungen
+                </button>
+                <button
+                  onClick={() => setIsResetDbModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-800 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs animate-fade-in"
+                  id="reset-db-toggle-btn"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-600" />
+                  Daten zurücksetzen (Blanko)
                 </button>
               </>
             )}
@@ -1829,7 +1929,11 @@ export default function App() {
         <section className="grid grid-cols-2 lg:grid-cols-5 gap-3" id="statistics-bento">
           {/* Tile 1: Kassenbestand */}
           <div 
-            onClick={() => setIsExpenseModalOpen(true)}
+            onClick={() => {
+              if (!isEditingCashBalance) {
+                setIsExpenseModalOpen(true);
+              }
+            }}
             className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs hover:border-emerald-500 hover:shadow-md hover:scale-[1.02] active:scale-95 transition-all duration-200 cursor-pointer group"
           >
             <div className="flex justify-between items-start">
@@ -1837,16 +1941,79 @@ export default function App() {
                 <Coins className="w-3 h-3 text-emerald-600" />
                 Kassenbestand (Ist)
               </span>
-              <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-md px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shrink-0">
-                Verwalten ➔
-              </span>
+              {isAdminMode && !isEditingCashBalance && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingCashBalance(true);
+                    setEditCashBalanceValue(((stats.totalPaid - stats.totalExpenses) + manualCashAdjustment).toFixed(2));
+                  }}
+                  className="p-1 bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-md transition border border-slate-100 cursor-pointer shrink-0"
+                  title="Kassenstand manuell anpassen"
+                >
+                  <Edit2 className="w-3 h-3" />
+                </button>
+              )}
+              {!isAdminMode && (
+                <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-md px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shrink-0">
+                  Verwalten ➔
+                </span>
+              )}
             </div>
-            <p className="text-2xl font-black text-emerald-600 font-mono mt-1">
-              {(stats.totalPaid - stats.totalExpenses).toFixed(2)} €
-            </p>
-            <span className="text-[10px] text-slate-400 block mt-1">
-              Eingezahlt: {stats.totalPaid.toFixed(2)} € • Ausgaben: {stats.totalExpenses.toFixed(2)} €
-            </span>
+            
+            {isEditingCashBalance ? (
+              <form 
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  await handleSaveManualCashAdjustment(editCashBalanceValue);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                className="mt-2 flex items-center gap-1"
+              >
+                <input
+                  type="text"
+                  autoFocus
+                  value={editCashBalanceValue}
+                  onChange={(e) => setEditCashBalanceValue(e.target.value)}
+                  className="w-24 bg-white border border-slate-200 rounded-md px-2 py-1 text-sm font-mono text-slate-800 focus:outline-none focus:border-emerald-500 text-right font-bold"
+                  placeholder="0,00"
+                />
+                <span className="text-sm font-bold text-slate-500 font-mono">€</span>
+                <button
+                  type="submit"
+                  className="p-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md transition cursor-pointer shrink-0"
+                  title="Speichern"
+                >
+                  <Save className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsEditingCashBalance(false);
+                  }}
+                  className="p-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md transition cursor-pointer shrink-0"
+                  title="Abbrechen"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </form>
+            ) : (
+              <>
+                <p className="text-2xl font-black text-emerald-600 font-mono mt-1">
+                  {((stats.totalPaid - stats.totalExpenses) + manualCashAdjustment).toFixed(2)} €
+                </p>
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  Eingezahlt: {stats.totalPaid.toFixed(2)} € • Ausgaben: {stats.totalExpenses.toFixed(2)} €
+                </span>
+                {manualCashAdjustment !== 0 && (
+                  <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 px-1 py-0.5 rounded-md mt-1 inline-block font-sans font-medium">
+                    ⚠️ Manuell angepasst ({manualCashAdjustment > 0 ? '+' : ''}{manualCashAdjustment.toFixed(2)} €)
+                  </span>
+                )}
+              </>
+            )}
           </div>
 
           {/* Tile 2: Offene Forderungen */}
@@ -2223,9 +2390,70 @@ export default function App() {
         onAddExpense={handleAddExpense}
         onDeleteExpense={handleDeleteExpense}
         totalPaid={stats.totalPaid}
+        manualCashAdjustment={manualCashAdjustment}
         isAdminMode={isAdminMode}
         setIsAdminMode={setIsAdminMode}
       />
+
+      {/* Reset Database / Blank Slate Confirmation Modal */}
+      {isResetDbModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" id="reset-db-modal">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-rose-700 flex items-center gap-2">
+                <Trash2 className="w-5 h-5 text-rose-600 animate-pulse" />
+                Datenbank nullen &amp; Blanko starten
+              </h3>
+              <button 
+                onClick={() => setIsResetDbModalOpen(false)}
+                className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="space-y-2">
+              <p className="text-sm text-slate-700 font-medium leading-relaxed">
+                Möchtest du wirklich alle Kontostände und Buchungen zurücksetzen, um <strong>vollkommen leer (Blanko) zu starten</strong>?
+              </p>
+              
+              <div className="bg-rose-50 border border-rose-100 text-rose-800 p-4 rounded-2xl text-xs space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  ⚠️ Folgende Daten werden unwiderruflich gelöscht/zurückgesetzt:
+                </p>
+                <ul className="list-disc list-inside space-y-0.5 ml-1 mt-1 text-rose-700 font-medium">
+                  <li>Alle Getränke-Einträge aller Spieler werden genullt.</li>
+                  <li>Alle verhängten Strafen aller Spieler werden genullt.</li>
+                  <li>Alle Zahlungen/Beiträge aller Spieler werden genullt (0,00 €).</li>
+                  <li>Die gesamte Transaktions-Historie (Zahlungen/Käufe) wird gelöscht.</li>
+                  <li>Alle manuellen Vereins-Ausgaben werden gelöscht.</li>
+                  <li>Die manuelle Kassen-Korrektur wird auf 0,00 € zurückgesetzt.</li>
+                </ul>
+              </div>
+
+              <p className="text-[11px] text-slate-500 italic">
+                Hinweis: Die Grund-Auswahl an Spielern, Getränkepreisen und dem Strafenkatalog bleibt unberührt, sodass du sofort mit dem Testen starten kannst.
+              </p>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button
+                onClick={() => setIsResetDbModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={handleWipeDatabase}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-rose-200"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Ja, alles nullen (Blanko)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Admin PIN Prompt for Fines/Bookings Booking */}
       {pendingAdminAction && (

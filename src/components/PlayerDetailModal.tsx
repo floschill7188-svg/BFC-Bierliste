@@ -81,12 +81,20 @@ export default function PlayerDetailModal({
     e.preventDefault();
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) return;
+    if (!isAdminMode) {
+      onAddPayment(player.id, amount); // Will trigger admin PIN prompt
+      return;
+    }
     onAddPayment(player.id, amount);
     setPaymentAmount('');
   };
 
   const handleSettleFull = () => {
     if (balance <= 0) return;
+    if (!isAdminMode) {
+      onAddPayment(player.id, balance); // Will trigger admin PIN prompt
+      return;
+    }
     onAddPayment(player.id, balance);
     setPaymentAmount('');
   };
@@ -334,9 +342,9 @@ export default function PlayerDetailModal({
                                 ? 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                                 : 'bg-slate-50 border-slate-100 text-slate-300 cursor-not-allowed'
                             }`}
-                            title={!isAuthorized ? "Freigabe erforderlich" : undefined}
+                            title={!isAdminMode ? "Trainer-Freigabe erforderlich" : undefined}
                           >
-                            {!isAuthorized && count > 0 ? (
+                            {!isAdminMode && count > 0 ? (
                               <Lock className="w-3.5 h-3.5 text-slate-400" />
                             ) : (
                               <Minus className="w-3.5 h-3.5" />
@@ -346,9 +354,9 @@ export default function PlayerDetailModal({
                           <button
                             onClick={() => onAddFine(player.id, fine.id)}
                             className="p-1.5 bg-amber-50 hover:bg-amber-500 border border-amber-200 hover:border-amber-500 text-amber-600 hover:text-white rounded-lg transition cursor-pointer flex items-center justify-center"
-                            title={!isAuthorized ? "Freigabe erforderlich" : undefined}
+                            title={!isAdminMode ? "Trainer-Freigabe erforderlich" : undefined}
                           >
-                            {isAuthorized ? (
+                            {isAdminMode ? (
                               <Plus className="w-3.5 h-3.5" />
                             ) : (
                               <Lock className="w-3.5 h-3.5" />
@@ -389,7 +397,7 @@ export default function PlayerDetailModal({
                     type="submit"
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm px-4 py-2 rounded-lg transition active:scale-95 shrink-0 cursor-pointer flex items-center gap-1.5"
                   >
-                    {!isAuthorized && <Lock className="w-3.5 h-3.5 text-emerald-200" />}
+                    {!isAdminMode && <Lock className="w-3.5 h-3.5 text-emerald-200" />}
                     <span>Einzahlen</span>
                   </button>
 
@@ -399,7 +407,7 @@ export default function PlayerDetailModal({
                       onClick={handleSettleFull}
                       className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-semibold text-sm px-4 py-2 rounded-lg transition shrink-0 cursor-pointer shadow-2xs flex items-center gap-1.5"
                     >
-                      {!isAuthorized && <Lock className="w-3.5 h-3.5 text-slate-400" />}
+                      {!isAdminMode && <Lock className="w-3.5 h-3.5 text-slate-400" />}
                       <span>Alles ({balance.toFixed(2)} €) begleichen</span>
                     </button>
                   )}

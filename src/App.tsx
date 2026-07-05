@@ -49,6 +49,16 @@ import {
   Trash2
 } from 'lucide-react';
 
+function cleanForFirestore<T extends object>(obj: T): T {
+  const clean: any = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      clean[key] = val;
+    }
+  }
+  return clean;
+}
+
 function calculateNextRunTime(schedule: NotificationSchedule): number | undefined {
   if (!schedule.isActive) return undefined;
   
@@ -181,7 +191,7 @@ export default function App() {
   
   // Pending Admin/Booking action state
   const [pendingAdminAction, setPendingAdminAction] = useState<{
-    type: 'record_fine' | 'remove_fine' | 'bulk_fine' | 'add_player' | 'edit_player' | 'delete_player' | 'record_drink' | 'remove_drink' | 'record_payment' | 'revert_transaction' | 'bulk_drink' | 'open_catalog' | 'add_expense' | 'delete_expense';
+    type: 'record_fine' | 'remove_fine' | 'bulk_fine' | 'add_player' | 'edit_player' | 'delete_player' | 'record_drink' | 'remove_drink' | 'record_payment' | 'revert_transaction' | 'bulk_drink' | 'open_catalog' | 'add_expense' | 'delete_expense' | 'player_login' | 'trainer_login';
     playerId?: string;
     fineId?: string;
     playerIds?: string[];
@@ -443,7 +453,7 @@ export default function App() {
             }
           ];
           defaultSchedules.forEach(schedule => {
-            setDoc(doc(db, 'schedules', schedule.id), schedule).catch(e => console.error("Failed to seed default schedule:", e));
+            setDoc(doc(db, 'schedules', schedule.id), cleanForFirestore(schedule)).catch(e => console.error("Failed to seed default schedule:", e));
           });
         } else {
           setSchedules(schedulesList);
@@ -593,10 +603,10 @@ export default function App() {
           nextRun = calculateNextRunTime(schedule);
           if (nextRun) {
             try {
-              await setDoc(doc(db, 'schedules', schedule.id), {
+              await setDoc(doc(db, 'schedules', schedule.id), cleanForFirestore({
                 ...schedule,
                 nextRunTime: nextRun
-              });
+              }));
             } catch (err) {
               console.error("Failed to update schedule nextRunTime: ", err);
             }
@@ -632,16 +642,16 @@ export default function App() {
               
               if (freshSchedule.type === 'once') {
                 updatedSchedule.isActive = false;
-                updatedSchedule.nextRunTime = undefined;
+                updatedSchedule.nextRunTime = null;
               } else {
                 const nextRunTime = calculateNextRunTime({
                   ...freshSchedule,
                   lastTriggered: updatedSchedule.lastTriggered
                 });
-                updatedSchedule.nextRunTime = nextRunTime;
+                updatedSchedule.nextRunTime = nextRunTime !== undefined ? nextRunTime : null;
               }
               
-              transaction.set(scheduleDocRef, updatedSchedule);
+              transaction.set(scheduleDocRef, cleanForFirestore(updatedSchedule));
             });
             console.log(`Successfully triggered scheduled notification: ${schedule.id}`);
           } catch (err) {
@@ -962,7 +972,7 @@ export default function App() {
 
   // Quick record fine (handles authorization check)
   const handleRecordFine = (playerId: string, fineId: string) => {
-    if (isAdminMode || isBookingAuthorized) {
+    if (isAdminMode) {
       executeRecordFine(playerId, fineId);
     } else {
       setPendingAdminAction({ type: 'record_fine', playerId, fineId });
@@ -1025,7 +1035,7 @@ export default function App() {
 
   // Decrement fine booking (handles authorization check)
   const handleRemoveFine = (playerId: string, fineId: string) => {
-    if (isAdminMode || isBookingAuthorized) {
+    if (isAdminMode) {
       executeRemoveFine(playerId, fineId);
     } else {
       setPendingAdminAction({ type: 'remove_fine', playerId, fineId });
@@ -1067,7 +1077,7 @@ export default function App() {
   };
 
   const handleRecordPayment = (playerId: string, amount: number) => {
-    if (isAdminMode || isBookingAuthorized) {
+    if (isAdminMode) {
       executeRecordPayment(playerId, amount);
     } else {
       setPendingAdminAction({ type: 'record_payment', playerId, itemId: amount.toString() });
@@ -1193,7 +1203,8 @@ export default function App() {
 
   // Bulk booking
   const handleBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string) => {
-    if (isAdminMode || isBookingAuthorized) {
+    const isAuthorizedForType = type === 'drink' ? (isAdminMode || isBookingAuthorized) : isAdminMode;
+    if (isAuthorizedForType) {
       executeBulkBook(playerIds, type, itemId);
     } else {
       setPendingAdminAction({ 
@@ -1227,7 +1238,7 @@ export default function App() {
           lastTriggered: timestamp,
           history: updatedHistory
         };
-        await setDoc(doc(db, 'schedules', id), updatedSched);
+        await setDoc(doc(db, 'schedules', id), cleanForFirestore(updatedSched));
       }
 
       setNotifStatus({ text: `📣 Meldung "${title}" wurde erfolgreich an alle gesendet!`, isError: false });
@@ -1246,7 +1257,7 @@ export default function App() {
         ...schedule,
         nextRunTime: nextRun || null
       };
-      await setDoc(doc(db, 'schedules', schedule.id), updated);
+      await setDoc(doc(db, 'schedules', schedule.id), cleanForFirestore(updated));
       setNotifStatus({ text: `💾 Sendeplan für "${schedule.title}" erfolgreich gespeichert!`, isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
@@ -1270,7 +1281,7 @@ export default function App() {
         onceDateTime: '',
         history: []
       };
-      await setDoc(doc(db, 'schedules', newId), newSchedule);
+      await setDoc(doc(db, 'schedules', newId), cleanForFirestore(newSchedule));
       setNotifStatus({ text: "✨ Neuer Sendeplan wurde erfolgreich angelegt!", isError: false });
       setTimeout(() => setNotifStatus(null), 4000);
     } catch (err) {
@@ -1296,7 +1307,10 @@ export default function App() {
   const handleAdminPromptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const pin = adminPromptPin;
-    const isPendingAdmin = pendingAdminAction && ['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type);
+    const isPendingAdmin = pendingAdminAction && [
+      'add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction',
+      'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'
+    ].includes(pendingAdminAction.type);
     
     let authorized = false;
 
@@ -1672,7 +1686,8 @@ export default function App() {
               </button>
             )}
 
-            {isBookingAuthorized || isAdminMode ? (
+            {/* Spieler Button */}
+            {isBookingAuthorized ? (
               <button
                 onClick={() => {
                   setIsBookingAuthorized(false);
@@ -1680,25 +1695,56 @@ export default function App() {
                   setShowBackupPanel(false);
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
-                id="global-lock-btn"
-                title="Buchungen wieder sperren"
+                id="global-lock-btn-player"
+                title="Spieler-Zugriff sperren"
               >
                 <Unlock className="w-4 h-4 text-emerald-600 animate-pulse" />
-                <span>Freigegeben</span>
+                <span>Spieler (Aktiv)</span>
               </button>
             ) : (
               <button
                 onClick={() => {
-                  setPendingAdminAction({ type: 'open_catalog' });
+                  setPendingAdminAction({ type: 'player_login' });
                   setAdminPromptPin('');
                   setAdminPromptError('');
                 }}
                 className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
-                id="global-unlock-btn"
-                title="PIN / Passwort eingeben"
+                id="global-unlock-btn-player"
+                title="Spieler PIN eingeben"
               >
                 <Lock className="w-4 h-4 text-rose-600" />
-                <span>Gesperrt</span>
+                <span>Spieler (Gesperrt)</span>
+              </button>
+            )}
+
+            {/* Trainer Button */}
+            {isAdminMode ? (
+              <button
+                onClick={() => {
+                  setIsAdminMode(false);
+                  setIsBookingAuthorized(false);
+                  setShowBackupPanel(false);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                id="global-lock-btn-trainer"
+                title="Trainer-Zugriff sperren"
+              >
+                <Unlock className="w-4 h-4 text-amber-600 animate-pulse" />
+                <span>Trainer (Aktiv)</span>
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setPendingAdminAction({ type: 'trainer_login' });
+                  setAdminPromptPin('');
+                  setAdminPromptError('');
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+                id="global-unlock-btn-trainer"
+                title="Trainer PIN eingeben"
+              >
+                <Lock className="w-4 h-4 text-rose-600" />
+                <span>Trainer (Gesperrt)</span>
               </button>
             )}
 
@@ -1984,6 +2030,7 @@ export default function App() {
                     onAddFine={handleRecordFine}
                     onOpenDetails={setSelectedPlayer}
                     isAuthorized={isBookingAuthorized || isAdminMode}
+                    isAdminMode={isAdminMode}
                   />
                 ))
               )}
@@ -2014,6 +2061,7 @@ export default function App() {
               fines={fines}
               onBulkBook={handleBulkBook}
               isAuthorized={isBookingAuthorized || isAdminMode}
+              isAdminMode={isAdminMode}
             />
 
             {/* Global History activity log */}
@@ -2184,10 +2232,12 @@ export default function App() {
           <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <Lock className="w-4 h-4 text-amber-600" />
-                {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type)
-                  ? 'Admin-Freigabe erforderlich'
-                  : 'Buchungs-Passwort erforderlich'}
+                <Lock className="w-4 h-4 text-[#FF6B00]" />
+                {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
+                  ? 'Trainer-Freigabe erforderlich'
+                  : pendingAdminAction.type === 'player_login'
+                  ? 'Spieler-Freigabe erforderlich'
+                  : 'Freigabe zum Buchen erforderlich'}
               </h3>
               <button
                 onClick={() => setPendingAdminAction(null)}
@@ -2198,18 +2248,20 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type)
-                ? 'Diese Aktion ist nur für Admins gestattet. Bitte gib den Admin-PIN ein.'
-                : 'Schreibende Buchungen sind passwortgeschützt. Bitte gib das Passwort ein.'}
+              {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
+                ? 'Diese Aktion ist nur für Trainer gestattet. Bitte gib den Trainer-PIN ein.'
+                : pendingAdminAction.type === 'player_login'
+                ? 'Bitte gib das Spieler-Passwort (PIN) ein, um Getränke buchen zu können.'
+                : 'Getränke buchen ist passwortgeschützt. Bitte gib das Spieler- oder Trainer-Passwort ein.'}
             </p>
 
             <form onSubmit={handleAdminPromptSubmit} className="space-y-4">
               <div>
                 <input
                   type="password"
-                  placeholder={['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction'].includes(pendingAdminAction.type)
-                    ? 'Admin-PIN'
-                    : 'Passwort'}
+                  placeholder={['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
+                    ? 'Trainer-PIN'
+                    : 'Spieler- oder Trainer-PIN'}
                   value={adminPromptPin}
                   onChange={(e) => setAdminPromptPin(e.target.value)}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-center text-sm font-mono focus:outline-none focus:border-[#FF6B00] shadow-2xs"

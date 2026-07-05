@@ -11,6 +11,7 @@ interface PlayerCardProps {
   onAddFine: (playerId: string, fineId: string) => void;
   onOpenDetails: (player: Player) => void;
   isAuthorized: boolean;
+  isAdminMode: boolean;
 }
 
 export default function PlayerCard({
@@ -21,6 +22,7 @@ export default function PlayerCard({
   onAddFine,
   onOpenDetails,
   isAuthorized,
+  isAdminMode,
 }: PlayerCardProps) {
   // Calculate total costs
   const totalDrinksCost = Object.entries(player.drinksCount).reduce((acc, [drinkId, qty]) => {
@@ -114,7 +116,7 @@ export default function PlayerCard({
         onClick={(e) => e.stopPropagation()} // Prevent opening details modal when quick booking is clicked
       >
         <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-          {isAuthorized ? 'Quick:' : '🔒 Lock:'}
+          {(isAuthorized || isAdminMode) ? 'Quick:' : '🔒 Lock:'}
         </span>
 
         {popularDrinks.map((drink) => (
@@ -138,10 +140,10 @@ export default function PlayerCard({
           <button
             onClick={() => onAddFine(player.id, fines[0].id)}
             className="flex items-center justify-center p-1.5 bg-white hover:bg-amber-600/10 hover:text-amber-600 hover:border-amber-400 border border-slate-200 rounded-lg transition-all shadow-xs"
-            title={isAuthorized ? `Strafe buchen: ${fines[0].name} (${fines[0].amount.toFixed(2)} €)` : `Strafe buchen (Freigabe erforderlich)`}
+            title={isAdminMode ? `Strafe buchen: ${fines[0].name} (${fines[0].amount.toFixed(2)} €)` : `Strafe buchen (Trainer-Freigabe erforderlich)`}
             id={`quick-fine-${player.id}`}
           >
-            {isAuthorized ? (
+            {isAdminMode ? (
               <Plus className="w-3 h-3 text-amber-500" />
             ) : (
               <Lock className="w-2.5 h-2.5 text-slate-400 shrink-0" />

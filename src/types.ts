@@ -87,7 +87,7 @@ export interface NotificationSchedule {
   repeatingDay?: 'daily' | 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
   repeatingTime?: string; // "HH:MM"
   lastTriggered?: string; // ISO string of last trigger
-  nextRunTime?: number; // millisecond timestamp of next run
+  nextRunTime?: number | null; // millisecond timestamp of next run
   history?: string[]; // ISO strings of last 3 triggered times
 }
 

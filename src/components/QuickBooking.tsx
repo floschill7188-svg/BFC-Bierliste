@@ -8,9 +8,10 @@ interface QuickBookingProps {
   fines: Fine[];
   onBulkBook: (playerIds: string[], type: 'drink' | 'fine', itemId: string) => void;
   isAuthorized: boolean;
+  isAdminMode: boolean;
 }
 
-export default function QuickBooking({ players, drinks, fines, onBulkBook, isAuthorized }: QuickBookingProps) {
+export default function QuickBooking({ players, drinks, fines, onBulkBook, isAuthorized, isAdminMode }: QuickBookingProps) {
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
   const [bookingType, setBookingType] = useState<'drink' | 'fine'>('drink');
   const [selectedItemId, setSelectedItemId] = useState<string>('');
@@ -52,7 +53,9 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook, isAut
 
     onBulkBook(selectedPlayerIds, bookingType, selectedItemId);
 
-    if (isAuthorized) {
+    const hasAccess = bookingType === 'drink' ? isAuthorized : isAdminMode;
+
+    if (hasAccess) {
       const itemName =
         bookingType === 'drink'
           ? drinks.find((d) => d.id === selectedItemId)?.name
@@ -221,17 +224,22 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook, isAut
         </div>
 
         {/* Submit */}
-        <button
-          type="submit"
-          className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition active:scale-95 duration-150 shadow-sm cursor-pointer"
-        >
-          {isAuthorized ? (
-            <Zap className="w-3.5 h-3.5" />
-          ) : (
-            <Lock className="w-3.5 h-3.5 text-orange-200" />
-          )}
-          <span>{isAuthorized ? "Sammelbuchung durchführen" : "Freigabe zum Buchen erforderlich"}</span>
-        </button>
+        {(() => {
+          const hasAccess = bookingType === 'drink' ? isAuthorized : isAdminMode;
+          return (
+            <button
+              type="submit"
+              className="w-full bg-[#FF6B00] hover:bg-orange-600 text-white text-xs font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-1.5 transition active:scale-95 duration-150 shadow-sm cursor-pointer"
+            >
+              {hasAccess ? (
+                <Zap className="w-3.5 h-3.5" />
+              ) : (
+                <Lock className="w-3.5 h-3.5 text-orange-200" />
+              )}
+              <span>{hasAccess ? "Sammelbuchung durchführen" : (bookingType === 'fine' ? "Trainer-Freigabe erforderlich" : "Freigabe zum Buchen erforderlich")}</span>
+            </button>
+          );
+        })()}
       </form>
     </div>
   );

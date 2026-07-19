@@ -194,6 +194,16 @@ export default function App() {
   const [bottomPinInput, setBottomPinInput] = useState('');
   const [bottomPinError, setBottomPinError] = useState('');
   
+  // Payment Info State
+  const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [paypalInfo, setPaypalInfo] = useState('');
+  const [weroInfo, setWeroInfo] = useState('');
+  const [tempPaypalInfo, setTempPaypalInfo] = useState('');
+  const [tempWeroInfo, setTempWeroInfo] = useState('');
+  const [isEditingPaymentInfo, setIsEditingPaymentInfo] = useState(false);
+  const [paymentPinInput, setPaymentPinInput] = useState('');
+  const [paymentPinError, setPaymentPinError] = useState('');
+  
   // Pending Admin/Booking action state
   const [pendingAdminAction, setPendingAdminAction] = useState<{
     type: 'record_fine' | 'remove_fine' | 'bulk_fine' | 'add_player' | 'edit_player' | 'delete_player' | 'record_drink' | 'remove_drink' | 'record_payment' | 'revert_transaction' | 'bulk_drink' | 'open_catalog' | 'add_expense' | 'delete_expense' | 'player_login' | 'trainer_login';
@@ -369,6 +379,12 @@ export default function App() {
           const data = docSnap.data();
           if (typeof data.manualCashAdjustment === 'number') {
             setManualCashAdjustment(data.manualCashAdjustment);
+          }
+          if (typeof data.paypalInfo === 'string') {
+            setPaypalInfo(data.paypalInfo);
+          }
+          if (typeof data.weroInfo === 'string') {
+            setWeroInfo(data.weroInfo);
           }
         }
       }, (err) => {
@@ -1487,6 +1503,25 @@ export default function App() {
     }
   };
 
+  // Save PayPal and Wero payment information
+  const handleSavePaymentInfo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await setDoc(doc(db, 'settings', 'app'), { 
+        paypalInfo: tempPaypalInfo, 
+        weroInfo: tempWeroInfo 
+      }, { merge: true });
+      setPaypalInfo(tempPaypalInfo);
+      setWeroInfo(tempWeroInfo);
+      setIsEditingPaymentInfo(false);
+      setPaymentPinInput('');
+      setPaymentPinError('');
+    } catch (err) {
+      console.error("Failed to save payment info:", err);
+      alert("Fehler beim Speichern der Zahlungsinfos.");
+    }
+  };
+
   // Reset entire catalog to default values
   const handleResetCatalogToDefaults = () => {
     saveState(players, DEFAULT_DRINKS, DEFAULT_FINES, transactions);
@@ -1851,6 +1886,21 @@ export default function App() {
                 </button>
               </>
             )}
+
+            {/* Zahlung Button */}
+            <button
+              onClick={() => {
+                setTempPaypalInfo(paypalInfo);
+                setTempWeroInfo(weroInfo);
+                setIsPaymentModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-950/40 hover:bg-blue-900/50 text-blue-300 border border-blue-900/40 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+              id="global-payment-btn"
+              title="Zahlungsinfos anzeigen"
+            >
+              <Coins className="w-4 h-4 text-blue-400" />
+              <span>Zahlung</span>
+            </button>
 
             {typeof window !== 'undefined' && 'Notification' in window && (
               <button
@@ -2565,6 +2615,184 @@ export default function App() {
                 Ja, alles nullen (Blanko)
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Payment Info Modal (Zahlungsinfos) */}
+      {isPaymentModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" id="payment-info-modal">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <Coins className="w-5 h-5 text-blue-600 animate-pulse" />
+                Zahlungsinformationen
+              </h3>
+              <button 
+                onClick={() => {
+                  setIsPaymentModalOpen(false);
+                  setIsEditingPaymentInfo(false);
+                  setPaymentPinInput('');
+                  setPaymentPinError('');
+                }}
+                className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {isEditingPaymentInfo ? (
+              // EDIT MODE
+              <form onSubmit={handleSavePaymentInfo} className="space-y-4">
+                <div className="space-y-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                      PayPal Link / Info
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#FF6B00]/40 focus:border-[#FF6B00]"
+                      placeholder="z.B. https://paypal.me/DeinName oder E-Mail"
+                      value={tempPaypalInfo}
+                      onChange={(e) => setTempPaypalInfo(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
+                      Wero Phone/IBAN / Info
+                    </label>
+                    <input
+                      type="text"
+                      className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#FF6B00]/40 focus:border-[#FF6B00]"
+                      placeholder="z.B. Mobilnummer für Wero oder IBAN"
+                      value={tempWeroInfo}
+                      onChange={(e) => setTempWeroInfo(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2 justify-end pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingPaymentInfo(false);
+                      setPaymentPinInput('');
+                      setPaymentPinError('');
+                    }}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Abbrechen
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-200"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    Speichern
+                  </button>
+                </div>
+              </form>
+            ) : (
+              // VIEW MODE
+              <div className="space-y-4">
+                <div className="bg-blue-50/50 border border-blue-100 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 bg-blue-100 text-blue-600 rounded-xl shrink-0 font-bold text-xs">
+                      PP
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-xs font-extrabold text-slate-900">PayPal</h4>
+                      <p className="text-xs text-slate-600 font-medium mt-1 whitespace-pre-wrap break-all">
+                        {paypalInfo ? (
+                          paypalInfo.startsWith('http') ? (
+                            <a 
+                              href={paypalInfo} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              className="text-blue-600 hover:underline inline-flex items-center gap-1"
+                            >
+                              {paypalInfo} ↗
+                            </a>
+                          ) : (
+                            paypalInfo
+                          )
+                        ) : (
+                          <span className="text-slate-400 italic">Noch keine PayPal-Infos hinterlegt.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-100 my-2"></div>
+
+                  <div className="flex items-start gap-2.5">
+                    <div className="p-2 bg-orange-100 text-orange-600 rounded-xl shrink-0 font-bold text-xs">
+                      WR
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-xs font-extrabold text-slate-900">Wero</h4>
+                      <p className="text-xs text-slate-600 font-medium mt-1 whitespace-pre-wrap break-all">
+                        {weroInfo ? (
+                          weroInfo
+                        ) : (
+                          <span className="text-slate-400 italic">Noch keine Wero-Infos hinterlegt.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-between items-center">
+                  {isAdminMode ? (
+                    <button
+                      onClick={() => {
+                        setTempPaypalInfo(paypalInfo);
+                        setTempWeroInfo(weroInfo);
+                        setIsEditingPaymentInfo(true);
+                      }}
+                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      Bearbeiten
+                    </button>
+                  ) : (
+                    <div className="w-full space-y-2">
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="password"
+                          className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#FF6B00]/40 focus:border-[#FF6B00]"
+                          placeholder="Trainer-PIN eingeben"
+                          value={paymentPinInput}
+                          onChange={(e) => {
+                            setPaymentPinInput(e.target.value);
+                            setPaymentPinError('');
+                          }}
+                        />
+                        <button
+                          onClick={() => {
+                            if (paymentPinInput === '2016') {
+                              setTempPaypalInfo(paypalInfo);
+                              setTempWeroInfo(weroInfo);
+                              setIsEditingPaymentInfo(true);
+                              setPaymentPinError('');
+                              setPaymentPinInput('');
+                            } else {
+                              setPaymentPinError('Falscher PIN!');
+                            }
+                          }}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition cursor-pointer shrink-0"
+                        >
+                          Bearbeiten
+                        </button>
+                      </div>
+                      {paymentPinError && (
+                        <p className="text-[10px] text-rose-600 font-semibold animate-fade-in">{paymentPinError}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

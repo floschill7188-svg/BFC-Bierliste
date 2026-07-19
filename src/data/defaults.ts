@@ -198,6 +198,24 @@ export const DEMO_PLAYERS: Player[] = [
     totalPaid: 0,
     team: 'Herren 2',
     teams: ['Herren 2'],
+  },
+  {
+    id: 'p21',
+    name: 'Mark',
+    drinksCount: {},
+    finesCount: {},
+    totalPaid: -11.6,
+    team: 'Herren 1',
+    teams: ['Herren 1'],
+  },
+  {
+    id: 'p22',
+    name: 'Paul',
+    drinksCount: {},
+    finesCount: {},
+    totalPaid: 61.3,
+    team: 'Herren 1',
+    teams: ['Herren 1'],
   }
 ];
 

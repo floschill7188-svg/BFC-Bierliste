@@ -24,21 +24,36 @@ try {
   console.error("[SERVER] Could not initialize Firestore:", err);
 }
 
-// Helper: Get SMTP Transporter (from Firestore config or Env vars)
-async function getTransporter() {
+// Helper: Load SMTP config from File or Firestore or Env
+async function getSmtpConfigData() {
   let host = process.env.SMTP_HOST || '';
-  let port = parseInt(process.env.SMTP_PORT || '587', 10);
+  let port = process.env.SMTP_PORT || '587';
   let user = process.env.SMTP_USER || '';
   let pass = process.env.SMTP_PASS || '';
   let from = process.env.SMTP_FROM || 'BFC Bierbot <noreply@bfc.de>';
 
+  // Check local file backup first
+  try {
+    if (fs.existsSync('./smtp-config.json')) {
+      const fileData = JSON.parse(fs.readFileSync('./smtp-config.json', 'utf8'));
+      if (fileData.host) host = fileData.host;
+      if (fileData.port) port = fileData.port;
+      if (fileData.user) user = fileData.user;
+      if (fileData.pass) pass = fileData.pass;
+      if (fileData.from) from = fileData.from;
+    }
+  } catch (e) {
+    console.error("[SERVER] Could not read ./smtp-config.json:", e);
+  }
+
+  // Check Firestore if available
   if (db) {
     try {
       const smtpDoc = await getDoc(doc(db, 'settings', 'smtp'));
       if (smtpDoc.exists()) {
         const data = smtpDoc.data();
         if (data.host) host = data.host;
-        if (data.port) port = parseInt(data.port, 10);
+        if (data.port) port = data.port;
         if (data.user) user = data.user;
         if (data.pass) pass = data.pass;
         if (data.from) from = data.from;
@@ -48,11 +63,23 @@ async function getTransporter() {
     }
   }
 
+  return { host, port, user, pass, from };
+}
+
+// Helper: Get SMTP Transporter
+async function getTransporter() {
+  const config = await getSmtpConfigData();
+  const host = config.host;
+  const port = parseInt(config.port || '587', 10);
+  const user = config.user;
+  const pass = config.pass;
+  const from = config.from || 'BFC Bierbot <noreply@bfc.de>';
+
   if (!host || !user || !pass) {
     return { 
       transporter: null, 
       from, 
-      error: 'SMTP ist nicht konfiguriert. Bitte erstelle Umgebungsvariablen (SMTP_HOST, SMTP_USER, SMTP_PASS) oder speichere die Server-Einstellungen in der App.' 
+      error: 'SMTP ist noch nicht vollständig eingerichtet. Bitte Host, Benutzername und Passwort eingeben.' 
     };
   }
 
@@ -218,46 +245,57 @@ app.get('/api/weekly-balances', async (req, res) => {
 // GET /api/smtp-config -> fetch configured SMTP settings (without pass)
 app.get('/api/smtp-config', async (req, res) => {
   try {
-    let host = process.env.SMTP_HOST || '';
-    let port = process.env.SMTP_PORT || '587';
-    let user = process.env.SMTP_USER || '';
-    let from = process.env.SMTP_FROM || 'BFC Bierbot <noreply@bfc.de>';
-    let hasPass = !!process.env.SMTP_PASS;
-
-    if (db) {
-      const smtpDoc = await getDoc(doc(db, 'settings', 'smtp'));
-      if (smtpDoc.exists()) {
-        const data = smtpDoc.data();
-        if (data.host) host = data.host;
-        if (data.port) port = data.port;
-        if (data.user) user = data.user;
-        if (data.from) from = data.from;
-        if (data.pass) hasPass = true;
-      }
-    }
-
-    res.json({ host, port, user, from, hasPass });
+    const config = await getSmtpConfigData();
+    res.json({
+      host: config.host || '',
+      port: config.port || '587',
+      user: config.user || '',
+      from: config.from || 'BFC Bierbot <noreply@bfc.de>',
+      hasPass: !!config.pass
+    });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST /api/smtp-config -> save SMTP settings to Firestore
+// POST /api/smtp-config -> save SMTP settings
 app.post('/api/smtp-config', async (req, res) => {
-  const { host, port, user, pass, from } = req.body;
-  if (!db) {
-    return res.status(500).json({ error: 'Firestore database not connected' });
-  }
+  const { host, port, user, pass, from } = req.body || {};
 
   try {
-    const updateData: any = { host, port, user, from };
-    if (pass !== undefined && pass !== '') {
-      updateData.pass = pass;
+    // Read existing config first to retain pass if unchanged
+    const currentConfig = await getSmtpConfigData();
+
+    const newConfig: any = {
+      host: String(host ?? currentConfig.host ?? ''),
+      port: String(port ?? currentConfig.port ?? '587'),
+      user: String(user ?? currentConfig.user ?? ''),
+      from: String(from ?? currentConfig.from ?? 'BFC Bierbot <noreply@bfc.de>'),
+      pass: pass !== undefined && pass !== '' ? String(pass) : (currentConfig.pass || '')
+    };
+
+    // 1. Write to local JSON file as backup
+    try {
+      fs.writeFileSync('./smtp-config.json', JSON.stringify(newConfig, null, 2), 'utf8');
+      console.log("[SERVER] SMTP config saved to ./smtp-config.json");
+    } catch (fileErr) {
+      console.error("[SERVER] Failed to save ./smtp-config.json:", fileErr);
     }
-    await setDoc(doc(db, 'settings', 'smtp'), updateData, { merge: true });
-    res.json({ success: true, message: 'SMTP-Konfiguration gespeichert' });
+
+    // 2. Write to Firestore if connected
+    if (db) {
+      try {
+        await setDoc(doc(db, 'settings', 'smtp'), newConfig, { merge: true });
+        console.log("[SERVER] SMTP config saved to Firestore");
+      } catch (fsErr: any) {
+        console.error("[SERVER] Failed to save SMTP config to Firestore:", fsErr);
+      }
+    }
+
+    res.json({ success: true, message: 'SMTP-Konfiguration erfolgreich gespeichert' });
   } catch (err: any) {
-    res.status(500).json({ error: err.message });
+    console.error("[SERVER] Error saving SMTP config:", err);
+    res.status(500).json({ error: 'Fehler beim Speichern: ' + err.message });
   }
 });
 

@@ -13,7 +13,7 @@ interface PlayerDetailModalProps {
   onAddFine: (playerId: string, fineId: string) => void;
   onRemoveFine: (playerId: string, fineId: string) => void;
   onAddPayment: (playerId: string, amount: number) => void;
-  onUpdatePlayer: (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => void;
+  onUpdatePlayer: (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[], email?: string) => void;
   onDeletePlayer: (id: string) => void;
   isAdminMode: boolean;
   isAuthorized: boolean;
@@ -47,9 +47,43 @@ export default function PlayerDetailModal({
   // Edit player state
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(player.name);
+  const [editEmail, setEditEmail] = useState(player.email || '');
   const [editNumber, setEditNumber] = useState(player.number || '');
   const [editTeams, setEditTeams] = useState<('Herren 1' | 'Herren 2')[]>(player.teams || (player.team ? [player.team] : ['Herren 1']));
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Email status state
+  const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [emailStatusMessage, setEmailStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const handleSendPlayerEmail = async () => {
+    if (!player.email) return;
+    setIsSendingEmail(true);
+    setEmailStatusMessage(null);
+
+    try {
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: player.email,
+          name: player.name,
+          betrag: balance
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setEmailStatusMessage({ text: `E-Mail erfolgreich an ${player.email} gesendet! 📩`, isError: false });
+      } else {
+        setEmailStatusMessage({ text: data.error || 'Fehler beim Senden der E-Mail', isError: true });
+      }
+    } catch (err: any) {
+      setEmailStatusMessage({ text: 'Netzwerkfehler: ' + (err.message || 'Server nicht erreichbar'), isError: true });
+    } finally {
+      setIsSendingEmail(false);
+    }
+  };
 
   // Filter player-specific transactions
   const playerTransactions = transactions
@@ -78,7 +112,7 @@ export default function PlayerDetailModal({
   const handleSavePlayerInfo = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editName.trim()) return;
-    onUpdatePlayer(player.id, editName.trim(), editNumber.trim() || undefined, editTeams);
+    onUpdatePlayer(player.id, editName.trim(), editNumber.trim() || undefined, editTeams, editEmail.trim() || undefined);
     setIsEditing(false);
   };
 
@@ -121,7 +155,15 @@ export default function PlayerDetailModal({
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
                     className="bg-white border border-slate-200 text-xs rounded-lg px-2 py-1 text-slate-800 focus:outline-none focus:border-[#FF6B00]"
+                    placeholder="Name"
                     required
+                  />
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    className="bg-white border border-slate-200 text-xs rounded-lg px-2 py-1 text-slate-800 focus:outline-none focus:border-[#FF6B00]"
+                    placeholder="E-Mail Adresse"
                   />
                   <input
                     type="text"
@@ -187,9 +229,30 @@ export default function PlayerDetailModal({
                   </button>
                 </div>
               )}
-              <p className="text-xs text-slate-500">
-                Mitglieder-Abrechnung • {player.teams && player.teams.length > 0 ? player.teams.join(' & ') : (player.team || 'Herren 1')}
+              <p className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                <span>Mitglieder-Abrechnung • {player.teams && player.teams.length > 0 ? player.teams.join(' & ') : (player.team || 'Herren 1')}</span>
+                {player.email && <span className="text-slate-400">({player.email})</span>}
               </p>
+              {player.email ? (
+                <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={handleSendPlayerEmail}
+                    disabled={isSendingEmail}
+                    className="flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 hover:bg-blue-100 active:scale-95 text-blue-700 border border-blue-200/80 rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs disabled:opacity-50"
+                  >
+                    <span>{isSendingEmail ? 'Wird gesendet...' : '✉️ Kontostand-Mail senden'}</span>
+                  </button>
+                  {emailStatusMessage && (
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-md ${emailStatusMessage.isError ? 'bg-rose-50 text-rose-600 border border-rose-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
+                      {emailStatusMessage.text}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-md mt-1 inline-block">
+                  💡 Keine E-Mail hinterlegt. Über "Name/Bleistift" E-Mail hinzufügen für Mail-Erinnerungen.
+                </p>
+              )}
             </div>
           </div>
 

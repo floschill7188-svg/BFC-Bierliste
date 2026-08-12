@@ -16,6 +16,7 @@ export interface Fine {
 export interface Player {
   id: string;
   name: string;
+  email?: string; // E-Mail address for weekly updates
   number?: string; // Trikotnummer (jersey number)
   drinksCount: { [drinkId: string]: number }; // drinkId -> quantity
   finesCount: { [fineId: string]: number }; // fineId -> quantity

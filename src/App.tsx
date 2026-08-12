@@ -49,7 +49,10 @@ import {
   Trash2,
   Clock,
   Edit2,
-  Save
+  Save,
+  Mail,
+  Send,
+  CheckCircle
 } from 'lucide-react';
 
 function cleanForFirestore<T extends object>(obj: T): T {
@@ -203,6 +206,105 @@ export default function App() {
   const [isEditingPaymentInfo, setIsEditingPaymentInfo] = useState(false);
   const [paymentPinInput, setPaymentPinInput] = useState('');
   const [paymentPinError, setPaymentPinError] = useState('');
+
+  // SMTP & Mail State
+  const [isSmtpModalOpen, setIsSmtpModalOpen] = useState(false);
+  const [smtpFormHost, setSmtpFormHost] = useState('');
+  const [smtpFormPort, setSmtpFormPort] = useState('587');
+  const [smtpFormUser, setSmtpFormUser] = useState('');
+  const [smtpFormPass, setSmtpFormPass] = useState('');
+  const [smtpFormFrom, setSmtpFormFrom] = useState('BFC Bierbot <noreply@bfc.de>');
+  const [smtpStatusMessage, setSmtpStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [isSendingBulkEmail, setIsSendingBulkEmail] = useState(false);
+  const [bulkEmailResult, setBulkEmailResult] = useState<{ text: string; isError: boolean } | null>(null);
+
+  const loadSmtpConfig = async () => {
+    try {
+      const res = await fetch('/api/smtp-config');
+      if (res.ok) {
+        const data = await res.json();
+        setSmtpFormHost(data.host || '');
+        setSmtpFormPort(data.port || '587');
+        setSmtpFormUser(data.user || '');
+        setSmtpFormFrom(data.from || 'BFC Bierbot <noreply@bfc.de>');
+      }
+    } catch (e) {
+      console.error("Failed to load SMTP config:", e);
+    }
+  };
+
+  const handleSaveSmtpConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSmtpStatusMessage(null);
+    try {
+      const res = await fetch('/api/smtp-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: smtpFormHost,
+          port: smtpFormPort,
+          user: smtpFormUser,
+          pass: smtpFormPass,
+          from: smtpFormFrom
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSmtpStatusMessage({ text: 'SMTP-Zugangsdaten erfolgreich gespeichert!', isError: false });
+        setSmtpFormPass('');
+      } else {
+        setSmtpStatusMessage({ text: data.error || 'Fehler beim Speichern der SMTP-Daten', isError: true });
+      }
+    } catch (err: any) {
+      setSmtpStatusMessage({ text: 'Fehler: ' + err.message, isError: true });
+    }
+  };
+
+  const handleTestSmtpConnection = async () => {
+    setIsTestingSmtp(true);
+    setSmtpStatusMessage(null);
+    try {
+      const res = await fetch('/api/test-smtp', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSmtpStatusMessage({ text: '✅ SMTP-Verbindung war erfolgreich!', isError: false });
+      } else {
+        setSmtpStatusMessage({ text: '❌ Test fehlgeschlagen: ' + (data.error || 'Verbindung nicht möglich'), isError: true });
+      }
+    } catch (err: any) {
+      setSmtpStatusMessage({ text: 'Fehler: ' + err.message, isError: true });
+    } finally {
+      setIsTestingSmtp(false);
+    }
+  };
+
+  const handleSendWeeklyBulkEmails = async () => {
+    setIsSendingBulkEmail(true);
+    setBulkEmailResult(null);
+    try {
+      const res = await fetch('/api/send-weekly-emails', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setBulkEmailResult({
+          text: `✅ ${data.count} Kontostand-E-Mail(s) erfolgreich versendet!`,
+          isError: false
+        });
+      } else {
+        setBulkEmailResult({
+          text: '❌ Fehler: ' + (data.error || 'E-Mails konnten nicht versendet werden'),
+          isError: true
+        });
+      }
+    } catch (err: any) {
+      setBulkEmailResult({
+        text: 'Fehler beim Versenden: ' + err.message,
+        isError: true
+      });
+    } finally {
+      setIsSendingBulkEmail(false);
+    }
+  };
   
   // Pending Admin/Booking action state
   const [pendingAdminAction, setPendingAdminAction] = useState<{
@@ -222,6 +324,7 @@ export default function App() {
   const [selectedPlayer, setSelectedPlayer] = useState<Player | null>(null);
   const [isNewPlayerModalOpen, setIsNewPlayerModalOpen] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
+  const [newPlayerEmail, setNewPlayerEmail] = useState('');
   const [newPlayerNumber, setNewPlayerNumber] = useState('');
   const [newPlayerTeams, setNewPlayerTeams] = useState<('Herren 1' | 'Herren 2')[]>(['Herren 1']);
 
@@ -827,6 +930,7 @@ export default function App() {
     const newPlayer: Player = {
       id: 'p_' + Date.now(),
       name: newPlayerName.trim(),
+      email: newPlayerEmail.trim() || undefined,
       number: newPlayerNumber.trim() || undefined,
       drinksCount: {},
       finesCount: {},
@@ -839,6 +943,7 @@ export default function App() {
     saveState(updatedPlayers, drinks, fines, transactions);
     
     setNewPlayerName('');
+    setNewPlayerEmail('');
     setNewPlayerNumber('');
     setNewPlayerTeams(['Herren 1']);
     setIsNewPlayerModalOpen(false);
@@ -1115,11 +1220,12 @@ export default function App() {
     }
   };
 
-  // Edit player name/number/teams (actual execution)
-  const executeUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => {
+  // Edit player name/number/teams/email (actual execution)
+  const executeUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[], email?: string) => {
     const updatedPlayers = players.map(p => (p.id === id ? { 
       ...p, 
       name, 
+      email,
       number, 
       team: teams && teams.length > 0 ? teams[0] : p.team,
       teams 
@@ -1134,6 +1240,7 @@ export default function App() {
       setSelectedPlayer({ 
         ...selectedPlayer, 
         name, 
+        email,
         number, 
         team: teams && teams.length > 0 ? teams[0] : selectedPlayer.team,
         teams 
@@ -1141,14 +1248,14 @@ export default function App() {
     }
   };
 
-  const handleUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[]) => {
+  const handleUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[], email?: string) => {
     if (isAdminMode) {
-      executeUpdatePlayer(id, name, number, teams);
+      executeUpdatePlayer(id, name, number, teams, email);
     } else {
       setPendingAdminAction({ 
         type: 'edit_player', 
         playerId: id, 
-        itemId: JSON.stringify({ name, number, teams }) 
+        itemId: JSON.stringify({ name, number, teams, email }) 
       });
       setAdminPromptPin('');
       setAdminPromptError('');
@@ -1394,7 +1501,7 @@ export default function App() {
         } else if (type === 'edit_player' && playerId && itemId) {
           try {
             const data = JSON.parse(itemId);
-            executeUpdatePlayer(playerId, data.name, data.number, data.teams);
+            executeUpdatePlayer(playerId, data.name, data.number, data.teams, data.email);
           } catch (e) {
             console.error(e);
           }
@@ -1900,6 +2007,20 @@ export default function App() {
             >
               <Coins className="w-4 h-4 text-blue-400" />
               <span>Zahlung</span>
+            </button>
+
+            {/* E-Mail Bot Button */}
+            <button
+              onClick={() => {
+                loadSmtpConfig();
+                setIsSmtpModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-800 rounded-xl text-xs font-semibold transition cursor-pointer shadow-2xs"
+              id="global-smtp-btn"
+              title="E-Mail-Versand & SMTP Konfiguration"
+            >
+              <Mail className="w-4 h-4 text-[#FF6B00]" />
+              <span>E-Mail Bot</span>
             </button>
 
             {typeof window !== 'undefined' && 'Notification' in window && (
@@ -2472,6 +2593,17 @@ export default function App() {
                   onChange={(e) => setNewPlayerName(e.target.value)}
                   className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-[#FF6B00] shadow-2xs"
                   required
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">E-Mail-Adresse (optional)</label>
+                <input
+                  type="email"
+                  placeholder="z.B. max@example.com"
+                  value={newPlayerEmail}
+                  onChange={(e) => setNewPlayerEmail(e.target.value)}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-850 focus:outline-none focus:border-[#FF6B00] shadow-2xs"
                 />
               </div>
 
@@ -3349,9 +3481,161 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* SMTP & E-Mail Bot Modal */}
+      {isSmtpModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-slate-200 rounded-3xl max-w-lg w-full p-6 space-y-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-orange-50 border border-orange-100 rounded-2xl text-[#FF6B00]">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg">E-Mail Bot & SMTP Einstellungen</h3>
+                  <p className="text-xs text-slate-500">Wöchentliche Kontostände per E-Mail versenden</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSmtpModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Quick Action: Bulk Email Send */}
+            <div className="p-4 bg-orange-50/60 border border-orange-200/60 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <Send className="w-4 h-4 text-[#FF6B00]" />
+                  Massen-Versand
+                </span>
+                <span className="text-[10px] bg-orange-100 text-[#FF6B00] font-bold px-2 py-0.5 rounded-full">
+                  {players.filter(p => !!p.email?.trim()).length} Spieler mit E-Mail
+                </span>
+              </div>
+              <p className="text-xs text-slate-600">
+                Verschickt an alle Spieler mit hinterlegter E-Mail-Adresse deren aktuellen Bierkontostand inklusive Zahlungs-Links.
+              </p>
+              <button
+                type="button"
+                onClick={handleSendWeeklyBulkEmails}
+                disabled={isSendingBulkEmail}
+                className="w-full py-2.5 px-4 bg-[#FF6B00] hover:bg-orange-600 text-white font-extrabold rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-sm disabled:opacity-50"
+              >
+                {isSendingBulkEmail ? (
+                  <span>E-Mails werden versendet... ⏳</span>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Wöchentliche Mails JETZT an alle senden</span>
+                  </>
+                )}
+              </button>
+
+              {bulkEmailResult && (
+                <div className={`p-3 rounded-xl text-xs font-semibold ${bulkEmailResult.isError ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}`}>
+                  {bulkEmailResult.text}
+                </div>
+              )}
+            </div>
+
+            {/* SMTP Server Configuration Form */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-black uppercase text-slate-400 tracking-wider">SMTP-Server Zugangsdaten</h4>
+
+              <form onSubmit={handleSaveSmtpConfig} className="space-y-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2 space-y-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">SMTP Server Host</label>
+                    <input
+                      type="text"
+                      placeholder="z.B. mail.gmx.net"
+                      value={smtpFormHost}
+                      onChange={(e) => setSmtpFormHost(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] font-mono"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Port</label>
+                    <input
+                      type="text"
+                      placeholder="587"
+                      value={smtpFormPort}
+                      onChange={(e) => setSmtpFormPort(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] font-mono text-center"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Benutzername / E-Mail</label>
+                  <input
+                    type="text"
+                    placeholder="deine.email@example.com"
+                    value={smtpFormUser}
+                    onChange={(e) => setSmtpFormUser(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] font-mono"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Passwort</label>
+                  <input
+                    type="password"
+                    placeholder="••••••••••••"
+                    value={smtpFormPass}
+                    onChange={(e) => setSmtpFormPass(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00] font-mono"
+                  />
+                  <span className="text-[10px] text-slate-400 block">Freilassen, wenn Passwort unverändert bleiben soll</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Absender Name &amp; Mail</label>
+                  <input
+                    type="text"
+                    placeholder="BFC Bierbot <noreply@bfc-verein.de>"
+                    value={smtpFormFrom}
+                    onChange={(e) => setSmtpFormFrom(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00]"
+                  />
+                </div>
+
+                {smtpStatusMessage && (
+                  <div className={`p-3 rounded-xl text-xs font-semibold ${smtpStatusMessage.isError ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+                    {smtpStatusMessage.text}
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleTestSmtpConnection}
+                    disabled={isTestingSmtp}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer border border-slate-200 disabled:opacity-50"
+                  >
+                    {isTestingSmtp ? 'Testet...' : '🧪 Verbindung testen'}
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm text-center"
+                  >
+                    💾 SMTP-Einstellungen speichern
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
         </>
       )}
 
     </div>
   );
 }
+

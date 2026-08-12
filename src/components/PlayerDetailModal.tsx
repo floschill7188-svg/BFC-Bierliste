@@ -217,13 +217,14 @@ export default function PlayerDetailModal({
                   <h2 className="text-lg font-extrabold text-slate-900">{player.name}</h2>
                   <button
                     onClick={() => {
-                      if (isAdminMode) {
+                      if (isAdminMode || isAuthorized) {
                         setIsEditing(true);
                       } else {
                         onTriggerAdminPrompt('edit_player');
                       }
                     }}
                     className="p-1 text-slate-400 hover:text-slate-700 rounded transition cursor-pointer"
+                    title="Profil & E-Mail bearbeiten"
                   >
                     <Edit2 className="w-3.5 h-3.5" />
                   </button>
@@ -249,9 +250,18 @@ export default function PlayerDetailModal({
                   )}
                 </div>
               ) : (
-                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-md mt-1 inline-block">
-                  💡 Keine E-Mail hinterlegt. Über "Name/Bleistift" E-Mail hinzufügen für Mail-Erinnerungen.
-                </p>
+                <button
+                  onClick={() => {
+                    if (isAdminMode || isAuthorized) {
+                      setIsEditing(true);
+                    } else {
+                      onTriggerAdminPrompt('edit_player');
+                    }
+                  }}
+                  className="text-[11px] text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 px-2 py-1 rounded-md mt-1.5 inline-flex items-center gap-1 font-medium transition cursor-pointer"
+                >
+                  <span>✉️ Keine E-Mail hinterlegt. Hier klicken zum Hinzufügen.</span>
+                </button>
               )}
             </div>
           </div>

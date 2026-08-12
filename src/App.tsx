@@ -1249,7 +1249,7 @@ export default function App() {
   };
 
   const handleUpdatePlayer = (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[], email?: string) => {
-    if (isAdminMode) {
+    if (isAdminMode || isBookingAuthorized) {
       executeUpdatePlayer(id, name, number, teams, email);
     } else {
       setPendingAdminAction({ 
@@ -1459,7 +1459,7 @@ export default function App() {
     e.preventDefault();
     const pin = adminPromptPin;
     const isPendingAdmin = pendingAdminAction && [
-      'add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction',
+      'add_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction',
       'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'
     ].includes(pendingAdminAction.type);
     
@@ -2936,11 +2936,11 @@ export default function App() {
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Lock className="w-4 h-4 text-[#FF6B00]" />
-                {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
+                {['add_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
                   ? 'Trainer-Freigabe erforderlich'
                   : pendingAdminAction.type === 'player_login'
                   ? 'Spieler-Freigabe erforderlich'
-                  : 'Freigabe zum Buchen erforderlich'}
+                  : 'Freigabe zum Buchen / Bearbeiten erforderlich'}
               </h3>
               <button
                 onClick={() => setPendingAdminAction(null)}
@@ -2951,18 +2951,18 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              {['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
+              {['add_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
                 ? 'Diese Aktion ist nur für Trainer gestattet. Bitte gib den Trainer-PIN ein.'
                 : pendingAdminAction.type === 'player_login'
                 ? 'Bitte gib das Spieler-Passwort (PIN) ein, um Getränke buchen zu können.'
-                : 'Getränke buchen ist passwortgeschützt. Bitte gib das Spieler- oder Trainer-Passwort ein.'}
+                : 'Zugriff passwortgeschützt. Bitte gib das Spieler- oder Trainer-Passwort ein.'}
             </p>
 
             <form onSubmit={handleAdminPromptSubmit} className="space-y-4">
               <div>
                 <input
                   type="password"
-                  placeholder={['add_player', 'edit_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
+                  placeholder={['add_player', 'delete_player', 'open_catalog', 'add_expense', 'delete_expense', 'revert_transaction', 'record_fine', 'remove_fine', 'bulk_fine', 'record_payment', 'trainer_login'].includes(pendingAdminAction.type)
                     ? 'Trainer-PIN'
                     : 'Spieler- oder Trainer-PIN'}
                   value={adminPromptPin}

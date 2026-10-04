@@ -19,8 +19,8 @@ export async function isDatabaseEmpty(): Promise<boolean> {
     const snapshot = await getDocs(q);
     return snapshot.empty;
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
-    return true;
+    console.error("Error checking isDatabaseEmpty:", error);
+    return false; // Safely return false so existing databases are never accidentally overwritten
   }
 }
 

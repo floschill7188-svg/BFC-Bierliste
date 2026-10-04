@@ -52,7 +52,8 @@ import {
   Save,
   Mail,
   Send,
-  CheckCircle
+  CheckCircle,
+  RefreshCw
 } from 'lucide-react';
 
 function cleanForFirestore<T extends object>(obj: T): T {
@@ -1796,6 +1797,49 @@ export default function App() {
     }
   };
 
+  const handleSyncBalancesFromHistory = async () => {
+    try {
+      const batch = writeBatch(db);
+      const updatedPlayers = players.map(player => {
+        const playerTxs = transactions.filter(t => t.playerId === player.id || (t.playerName && t.playerName.toLowerCase() === player.name.toLowerCase()));
+        const drinksCount: Record<string, number> = {};
+        const finesCount: Record<string, number> = {};
+        let totalPaid = 0;
+
+        for (const t of playerTxs) {
+          const qty = Number(t.quantity || 1);
+          const amt = Number(t.amount || 0);
+          if (t.type === 'drink') {
+            const itemId = t.itemId || 'd1';
+            drinksCount[itemId] = (drinksCount[itemId] || 0) + qty;
+          } else if (t.type === 'fine') {
+            const itemId = t.itemId || 'f1';
+            finesCount[itemId] = (finesCount[itemId] || 0) + qty;
+          } else if (t.type === 'payment') {
+            totalPaid += amt * qty;
+          }
+        }
+
+        const updated: Player = {
+          ...player,
+          drinksCount,
+          finesCount,
+          totalPaid: Number(totalPaid.toFixed(2))
+        };
+        batch.set(doc(db, 'players', player.id), updated);
+        return updated;
+      });
+
+      await batch.commit();
+      setPlayers(updatedPlayers);
+      setBackupMessage({ text: '✅ Alle Kontostände wurden erfolgreich anhand der Transaktions-Historie abgeglichen!', isError: false });
+      setTimeout(() => setBackupMessage(null), 5000);
+    } catch (err: any) {
+      console.error("Failed to sync balances:", err);
+      setBackupMessage({ text: 'Fehler beim Abgleich: ' + (err.message || err), isError: true });
+    }
+  };
+
   // Filter players based on search query and selected team
   const filteredPlayers = players.filter(player => {
     const matchesSearch = player.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -2203,6 +2247,29 @@ export default function App() {
                   Einlesen
                 </button>
               </form>
+            </div>
+
+            {/* Sync from History */}
+            <div className="space-y-3 md:col-span-2 pt-4 border-t border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200/60">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                    <RefreshCw className="w-4 h-4 text-[#FF6B00]" />
+                    Kontostände mit Historie abgleichen
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Prüft und synchronisiert alle Zähler und Kontostände der Spieler automatisch anhand aller vorhandenen Buchungen und Zahlungen im Aktivitäts-Protokoll.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSyncBalancesFromHistory}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-50 hover:bg-orange-100 text-[#FF6B00] border border-orange-200 rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs shrink-0"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  Jetzt abgleichen
+                </button>
+              </div>
             </div>
           </div>
         </div>

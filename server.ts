@@ -192,10 +192,11 @@ app.get('/api/weekly-balances', async (req, res) => {
   }
 
   try {
-    const [playersSnap, drinksSnap, finesSnap] = await Promise.all([
+    const [playersSnap, drinksSnap, finesSnap, txSnap] = await Promise.all([
       getDocs(collection(db, 'players')),
       getDocs(collection(db, 'drinks')),
-      getDocs(collection(db, 'fines'))
+      getDocs(collection(db, 'fines')),
+      getDocs(collection(db, 'transactions'))
     ]);
 
     const drinks: any[] = [];
@@ -204,25 +205,49 @@ app.get('/api/weekly-balances', async (req, res) => {
     const fines: any[] = [];
     finesSnap.forEach(f => fines.push({ id: f.id, ...f.data() }));
 
+    const txs: any[] = [];
+    txSnap.forEach(t => txs.push({ id: t.id, ...t.data() }));
+
     const result: any[] = [];
 
     playersSnap.forEach(docSnap => {
       const p: any = docSnap.data();
-      const drinksCount = p.drinksCount || {};
-      const finesCount = p.finesCount || {};
-      const totalPaid = p.totalPaid || 0;
+      const playerTxs = txs.filter(t => t.playerId === docSnap.id || (t.playerName && t.playerName.toLowerCase() === (p.name || '').toLowerCase()));
 
-      const totalDrinksCost = Object.entries(drinksCount).reduce((acc, [drinkId, qty]) => {
-        const drink = drinks.find(d => d.id === drinkId);
-        return acc + (drink ? drink.price * Number(qty) : 0);
-      }, 0);
+      let totalCost = 0;
+      let totalPaid = 0;
 
-      const totalFinesCost = Object.entries(finesCount).reduce((acc, [fineId, qty]) => {
-        const fine = fines.find(f => f.id === fineId);
-        return acc + (fine ? fine.amount * Number(qty) : 0);
-      }, 0);
+      if (playerTxs.length > 0) {
+        let drinksCost = 0;
+        let finesCost = 0;
+        let paid = 0;
+        for (const t of playerTxs) {
+          const qty = Number(t.quantity || 1);
+          const amt = Number(t.amount || 0);
+          if (t.type === 'drink') drinksCost += amt * qty;
+          else if (t.type === 'fine') finesCost += amt * qty;
+          else if (t.type === 'payment') paid += amt * qty;
+        }
+        totalCost = drinksCost + finesCost;
+        totalPaid = paid;
+      } else {
+        const drinksCount = p.drinksCount || {};
+        const finesCount = p.finesCount || {};
+        totalPaid = Number(p.totalPaid || 0);
 
-      const totalCost = totalDrinksCost + totalFinesCost;
+        const totalDrinksCost = Object.entries(drinksCount).reduce((acc, [drinkId, qty]) => {
+          const drink = drinks.find(d => d.id === drinkId);
+          return acc + (drink ? drink.price * Number(qty) : 0);
+        }, 0);
+
+        const totalFinesCost = Object.entries(finesCount).reduce((acc, [fineId, qty]) => {
+          const fine = fines.find(f => f.id === fineId);
+          return acc + (fine ? fine.amount * Number(qty) : 0);
+        }, 0);
+
+        totalCost = totalDrinksCost + totalFinesCost;
+      }
+
       const offenerBetrag = Number((totalCost - totalPaid).toFixed(2));
 
       result.push({
@@ -375,10 +400,11 @@ app.post('/api/send-weekly-emails', async (req, res) => {
 
   try {
     const { paypalInfo, weroInfo } = await getPaymentInfo();
-    const [playersSnap, drinksSnap, finesSnap] = await Promise.all([
+    const [playersSnap, drinksSnap, finesSnap, txSnap] = await Promise.all([
       getDocs(collection(db, 'players')),
       getDocs(collection(db, 'drinks')),
-      getDocs(collection(db, 'fines'))
+      getDocs(collection(db, 'fines')),
+      getDocs(collection(db, 'transactions'))
     ]);
 
     const drinks: any[] = [];
@@ -386,6 +412,9 @@ app.post('/api/send-weekly-emails', async (req, res) => {
 
     const fines: any[] = [];
     finesSnap.forEach(f => fines.push({ id: f.id, ...f.data() }));
+
+    const txs: any[] = [];
+    txSnap.forEach(t => txs.push({ id: t.id, ...t.data() }));
 
     const sentTo: string[] = [];
     const errors: string[] = [];
@@ -397,21 +426,42 @@ app.post('/api/send-weekly-emails', async (req, res) => {
 
       if (!email || !name) continue;
 
-      const drinksCount = p.drinksCount || {};
-      const finesCount = p.finesCount || {};
-      const totalPaid = p.totalPaid || 0;
+      const playerTxs = txs.filter(t => t.playerId === docSnap.id || (t.playerName && t.playerName.toLowerCase() === name.toLowerCase()));
 
-      const totalDrinksCost = Object.entries(drinksCount).reduce((acc, [drinkId, qty]) => {
-        const drink = drinks.find(d => d.id === drinkId);
-        return acc + (drink ? drink.price * Number(qty) : 0);
-      }, 0);
+      let totalCost = 0;
+      let totalPaid = 0;
 
-      const totalFinesCost = Object.entries(finesCount).reduce((acc, [fineId, qty]) => {
-        const fine = fines.find(f => f.id === fineId);
-        return acc + (fine ? fine.amount * Number(qty) : 0);
-      }, 0);
+      if (playerTxs.length > 0) {
+        let drinksCost = 0;
+        let finesCost = 0;
+        let paid = 0;
+        for (const t of playerTxs) {
+          const qty = Number(t.quantity || 1);
+          const amt = Number(t.amount || 0);
+          if (t.type === 'drink') drinksCost += amt * qty;
+          else if (t.type === 'fine') finesCost += amt * qty;
+          else if (t.type === 'payment') paid += amt * qty;
+        }
+        totalCost = drinksCost + finesCost;
+        totalPaid = paid;
+      } else {
+        const drinksCount = p.drinksCount || {};
+        const finesCount = p.finesCount || {};
+        totalPaid = Number(p.totalPaid || 0);
 
-      const totalCost = totalDrinksCost + totalFinesCost;
+        const totalDrinksCost = Object.entries(drinksCount).reduce((acc, [drinkId, qty]) => {
+          const drink = drinks.find(d => d.id === drinkId);
+          return acc + (drink ? drink.price * Number(qty) : 0);
+        }, 0);
+
+        const totalFinesCost = Object.entries(finesCount).reduce((acc, [fineId, qty]) => {
+          const fine = fines.find(f => f.id === fineId);
+          return acc + (fine ? fine.amount * Number(qty) : 0);
+        }, 0);
+
+        totalCost = totalDrinksCost + totalFinesCost;
+      }
+
       const offenerBetrag = Number((totalCost - totalPaid).toFixed(2));
 
       const subject = "BFC Bierbot - Dein Bierkontostand 🍺";

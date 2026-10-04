@@ -7,12 +7,13 @@ interface PlayerDetailModalProps {
   drinks: Drink[];
   fines: Fine[];
   transactions: Transaction[];
+  initialTeam?: 'Herren 1' | 'Herren 2';
   onClose: () => void;
-  onAddDrink: (playerId: string, drinkId: string) => void;
-  onRemoveDrink: (playerId: string, drinkId: string) => void;
-  onAddFine: (playerId: string, fineId: string) => void;
-  onRemoveFine: (playerId: string, fineId: string) => void;
-  onAddPayment: (playerId: string, amount: number) => void;
+  onAddDrink: (playerId: string, drinkId: string, team?: 'Herren 1' | 'Herren 2') => void;
+  onRemoveDrink: (playerId: string, drinkId: string, team?: 'Herren 1' | 'Herren 2') => void;
+  onAddFine: (playerId: string, fineId: string, team?: 'Herren 1' | 'Herren 2') => void;
+  onRemoveFine: (playerId: string, fineId: string, team?: 'Herren 1' | 'Herren 2') => void;
+  onAddPayment: (playerId: string, amount: number, team?: 'Herren 1' | 'Herren 2') => void;
   onUpdatePlayer: (id: string, name: string, number?: string, teams?: ('Herren 1' | 'Herren 2')[], email?: string) => void;
   onDeletePlayer: (id: string) => void;
   isAdminMode: boolean;
@@ -25,6 +26,7 @@ export default function PlayerDetailModal({
   drinks,
   fines,
   transactions,
+  initialTeam = 'Herren 1',
   onClose,
   onAddDrink,
   onRemoveDrink,
@@ -39,7 +41,15 @@ export default function PlayerDetailModal({
 }: PlayerDetailModalProps) {
   if (!player) return null;
 
+  const isMultiTeam = (player.teams && player.teams.length > 1) || (player.teams?.includes('Herren 1') && player.teams?.includes('Herren 2'));
+  const [activeTeamTab, setActiveTeamTab] = useState<'Herren 1' | 'Herren 2'>(() => {
+    if (initialTeam && player.teams?.includes(initialTeam)) return initialTeam;
+    if (player.teams?.includes('Herren 2') && !player.teams?.includes('Herren 1')) return 'Herren 2';
+    return 'Herren 1';
+  });
+
   const [activeSubTab, setActiveSubTab] = useState<'consume' | 'history' | 'edit'>('consume');
+  const [historyTeamFilter, setHistoryTeamFilter] = useState<'all' | 'Herren 1' | 'Herren 2'>('all');
 
   // Settle state
   const [paymentAmount, setPaymentAmount] = useState('');
@@ -56,6 +66,55 @@ export default function PlayerDetailModal({
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailStatusMessage, setEmailStatusMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
+  // Calculate costs per team
+  const getStats = (teamKey?: 'Herren 1' | 'Herren 2') => {
+    let dCount = player.drinksCount || {};
+    let fCount = player.finesCount || {};
+    let paid = Number(player.totalPaid || 0);
+
+    if (teamKey && player.teamStats && player.teamStats[teamKey]) {
+      dCount = player.teamStats[teamKey]?.drinksCount || {};
+      fCount = player.teamStats[teamKey]?.finesCount || {};
+      paid = Number(player.teamStats[teamKey]?.totalPaid || 0);
+    } else if (teamKey && !player.teams?.includes(teamKey)) {
+      dCount = {};
+      fCount = {};
+      paid = 0;
+    }
+
+    const drinksCost = Object.entries(dCount).reduce((acc, [drinkId, qty]) => {
+      const drink = drinks.find((d) => d.id === drinkId);
+      return acc + (drink ? drink.price * Number(qty) : 0);
+    }, 0);
+
+    const finesCost = Object.entries(fCount).reduce((acc, [fineId, qty]) => {
+      const fine = fines.find((f) => f.id === fineId);
+      return acc + (fine ? fine.amount * Number(qty) : 0);
+    }, 0);
+
+    const totalCost = drinksCost + finesCost;
+    const balance = Number((totalCost - paid).toFixed(2));
+    const points = Object.entries(fCount).reduce((acc, [fineId, qty]) => {
+      const fine = fines.find((f) => f.id === fineId);
+      return acc + (fine && fine.points ? fine.points * Number(qty) : 0);
+    }, 0);
+
+    return { drinksCost, finesCost, totalCost, paid, balance, points, dCount, fCount };
+  };
+
+  const currentStats = isMultiTeam ? getStats(activeTeamTab) : getStats();
+  const h1Stats = getStats('Herren 1');
+  const h2Stats = getStats('Herren 2');
+
+  const totalCost = currentStats.totalCost;
+  const balance = currentStats.balance;
+  const currentTotalPaid = currentStats.paid;
+  const totalPoints = currentStats.points;
+  const activeDrinksCount = currentStats.dCount;
+  const activeFinesCount = currentStats.fCount;
+
+  const effectiveTeam = isMultiTeam ? activeTeamTab : (player.teams?.[0] || player.team || 'Herren 1');
+
   const handleSendPlayerEmail = async () => {
     if (!player.email) return;
     setIsSendingEmail(true);
@@ -68,7 +127,10 @@ export default function PlayerDetailModal({
         body: JSON.stringify({
           to: player.email,
           name: player.name,
-          betrag: balance
+          betrag: isMultiTeam ? Number((h1Stats.balance + h2Stats.balance).toFixed(2)) : balance,
+          h1Betrag: h1Stats.balance,
+          h2Betrag: h2Stats.balance,
+          isMultiTeam
         })
       });
 
@@ -87,27 +149,15 @@ export default function PlayerDetailModal({
 
   // Filter player-specific transactions
   const playerTransactions = transactions
-    .filter((t) => t.playerId === player.id)
+    .filter((t) => {
+      const matchesPlayer = t.playerId === player.id;
+      if (!matchesPlayer) return false;
+      if (historyTeamFilter !== 'all') {
+        return (t.team || 'Herren 1') === historyTeamFilter;
+      }
+      return true;
+    })
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-
-  // Calculate costs
-  const totalDrinksCost = Object.entries(player.drinksCount).reduce((acc, [drinkId, qty]) => {
-    const drink = drinks.find((d) => d.id === drinkId);
-    return acc + (drink ? drink.price * qty : 0);
-  }, 0);
-
-  const totalFinesCost = Object.entries(player.finesCount).reduce((acc, [fineId, qty]) => {
-    const fine = fines.find((f) => f.id === fineId);
-    return acc + (fine ? fine.amount * qty : 0);
-  }, 0);
-
-  const totalPoints = Object.entries(player.finesCount).reduce((acc, [fineId, qty]) => {
-    const fine = fines.find((f) => f.id === fineId);
-    return acc + (fine && fine.points ? fine.points * qty : 0);
-  }, 0);
-
-  const totalCost = totalDrinksCost + totalFinesCost;
-  const balance = totalCost - player.totalPaid;
 
   const handleSavePlayerInfo = (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,20 +171,20 @@ export default function PlayerDetailModal({
     const amount = parseFloat(paymentAmount);
     if (isNaN(amount) || amount <= 0) return;
     if (!isAdminMode) {
-      onAddPayment(player.id, amount); // Will trigger admin PIN prompt
+      onAddPayment(player.id, amount, effectiveTeam); // Will trigger admin PIN prompt
       return;
     }
-    onAddPayment(player.id, amount);
+    onAddPayment(player.id, amount, effectiveTeam);
     setPaymentAmount('');
   };
 
   const handleSettleFull = () => {
     if (balance <= 0) return;
     if (!isAdminMode) {
-      onAddPayment(player.id, balance); // Will trigger admin PIN prompt
+      onAddPayment(player.id, balance, effectiveTeam); // Will trigger admin PIN prompt
       return;
     }
-    onAddPayment(player.id, balance);
+    onAddPayment(player.id, balance, effectiveTeam);
     setPaymentAmount('');
   };
 
@@ -275,11 +325,49 @@ export default function PlayerDetailModal({
           </button>
         </div>
 
+        {/* If Player in multiple teams: Team Selector Tabs */}
+        {isMultiTeam && (
+          <div className="flex gap-2 p-2 bg-slate-100 border-b border-slate-200">
+            <button
+              type="button"
+              onClick={() => setActiveTeamTab('Herren 1')}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                activeTeamTab === 'Herren 1'
+                  ? 'bg-[#FF6B00] text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 bg-white/70 hover:bg-white'
+              }`}
+            >
+              <span>🏀 Kasse Herren 1</span>
+              <span className={`font-mono px-2 py-0.5 rounded text-[11px] font-extrabold ${
+                activeTeamTab === 'Herren 1' ? 'bg-black/20 text-white' : 'bg-slate-200 text-slate-800'
+              }`}>
+                {h1Stats.balance === 0 ? '0,00 €' : h1Stats.balance < 0 ? `-${Math.abs(h1Stats.balance).toFixed(2)} €` : `+${h1Stats.balance.toFixed(2)} €`}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTeamTab('Herren 2')}
+              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 cursor-pointer ${
+                activeTeamTab === 'Herren 2'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 bg-white/70 hover:bg-white'
+              }`}
+            >
+              <span>🏀 Kasse Herren 2</span>
+              <span className={`font-mono px-2 py-0.5 rounded text-[11px] font-extrabold ${
+                activeTeamTab === 'Herren 2' ? 'bg-black/20 text-white' : 'bg-slate-200 text-slate-800'
+              }`}>
+                {h2Stats.balance === 0 ? '0,00 €' : h2Stats.balance < 0 ? `-${Math.abs(h2Stats.balance).toFixed(2)} €` : `+${h2Stats.balance.toFixed(2)} €`}
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Balance Cards Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 px-6 py-4 bg-slate-50/50 border-b border-slate-100">
           <div className="p-3 bg-white rounded-xl border border-slate-100 text-center shadow-2xs">
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-              {balance < 0 ? 'Guthaben' : 'Ausstehend'}
+              {balance < 0 ? 'Guthaben' : 'Ausstehend'} {isMultiTeam && `(${activeTeamTab === 'Herren 1' ? 'H1' : 'H2'})`}
             </span>
             <p className={`text-lg font-black mt-0.5 font-mono ${balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
               {balance < 0 ? `${Math.abs(balance).toFixed(2)} €` : `${balance.toFixed(2)} €`}
@@ -294,7 +382,7 @@ export default function PlayerDetailModal({
           <div className="p-3 bg-white rounded-xl border border-slate-100 text-center shadow-2xs">
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Beglichen</span>
             <p className="text-lg font-black text-emerald-600 mt-0.5 font-mono">
-              {player.totalPaid.toFixed(2)} €
+              {currentTotalPaid.toFixed(2)} €
             </p>
           </div>
           <div className="p-3 bg-amber-50/50 rounded-xl border border-amber-200/60 text-center shadow-2xs flex flex-col justify-between">
@@ -356,10 +444,19 @@ export default function PlayerDetailModal({
             <div className="space-y-6">
               {/* Quick Book Section */}
               <div>
-                <h3 className="text-xs uppercase font-extrabold text-slate-500 tracking-wider mb-3">Getränkekonsum eintragen</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs uppercase font-extrabold text-slate-500 tracking-wider">
+                    Getränkekonsum eintragen {isMultiTeam && `(für ${effectiveTeam})`}
+                  </h3>
+                  {isMultiTeam && (
+                    <span className="text-[10px] font-bold text-[#FF6B00] bg-orange-50 px-2 py-0.5 rounded-md border border-orange-200">
+                      Aktiv: {effectiveTeam}
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {drinks.filter((d) => d.isActive).map((drink) => {
-                    const count = player.drinksCount[drink.id] || 0;
+                    const count = activeDrinksCount[drink.id] || 0;
                     return (
                       <div
                         key={drink.id}
@@ -372,7 +469,7 @@ export default function PlayerDetailModal({
 
                         <div className="flex items-center gap-2.5">
                           <button
-                            onClick={() => onRemoveDrink(player.id, drink.id)}
+                            onClick={() => onRemoveDrink(player.id, drink.id, effectiveTeam)}
                             disabled={count === 0}
                             className={`p-1.5 rounded-lg border transition cursor-pointer ${
                               count > 0
@@ -389,7 +486,7 @@ export default function PlayerDetailModal({
                           </button>
                           <span className="font-mono font-bold text-sm text-slate-800 w-6 text-center">{count}</span>
                           <button
-                            onClick={() => onAddDrink(player.id, drink.id)}
+                            onClick={() => onAddDrink(player.id, drink.id, effectiveTeam)}
                             className="p-1.5 bg-orange-50 hover:bg-[#FF6B00] border border-orange-200 hover:border-[#FF6B00] text-[#FF6B00] hover:text-white rounded-lg transition cursor-pointer flex items-center justify-center"
                             title={!isAuthorized ? "Freigabe erforderlich" : undefined}
                           >
@@ -408,10 +505,19 @@ export default function PlayerDetailModal({
 
               {/* Strafen Section */}
               <div>
-                <h3 className="text-xs uppercase font-extrabold text-slate-500 tracking-wider mb-3">Strafenkatalog anwenden</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs uppercase font-extrabold text-slate-500 tracking-wider">
+                    Strafenkatalog anwenden {isMultiTeam && `(für ${effectiveTeam})`}
+                  </h3>
+                  {isMultiTeam && (
+                    <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                      Aktiv: {effectiveTeam}
+                    </span>
+                  )}
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {fines.filter((f) => f.isActive).map((fine) => {
-                    const count = player.finesCount[fine.id] || 0;
+                    const count = activeFinesCount[fine.id] || 0;
                     return (
                       <div
                         key={fine.id}
@@ -433,7 +539,7 @@ export default function PlayerDetailModal({
 
                         <div className="flex items-center gap-2.5 shrink-0">
                           <button
-                            onClick={() => onRemoveFine(player.id, fine.id)}
+                            onClick={() => onRemoveFine(player.id, fine.id, effectiveTeam)}
                             disabled={count === 0}
                             className={`p-1.5 rounded-lg border transition cursor-pointer ${
                               count > 0
@@ -450,7 +556,7 @@ export default function PlayerDetailModal({
                           </button>
                           <span className="font-mono font-bold text-sm text-slate-800 w-6 text-center">{count}</span>
                           <button
-                            onClick={() => onAddFine(player.id, fine.id)}
+                            onClick={() => onAddFine(player.id, fine.id, effectiveTeam)}
                             className="p-1.5 bg-amber-50 hover:bg-amber-500 border border-amber-200 hover:border-amber-500 text-amber-600 hover:text-white rounded-lg transition cursor-pointer flex items-center justify-center"
                             title={!isAdminMode ? "Trainer-Freigabe erforderlich" : undefined}
                           >
@@ -471,10 +577,10 @@ export default function PlayerDetailModal({
               <div className="p-4 bg-slate-50 border border-slate-150 rounded-2xl">
                 <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2 mb-2">
                   <CreditCard className="text-emerald-600 w-4 h-4" />
-                  Guthaben einzahlen / Begleichen
+                  Guthaben einzahlen / Begleichen {isMultiTeam && `(Kasse: ${effectiveTeam})`}
                 </h3>
                 <p className="text-xs text-slate-500 mb-4">
-                  Trage bar bezahltes Geld ein, um den Kontostand auszugleichen.
+                  Trage bar bezahltes Geld ein, um den Kontostand für {effectiveTeam} auszugleichen.
                 </p>
 
                 <form onSubmit={handlePaymentSubmit} className="flex gap-2">
@@ -496,7 +602,7 @@ export default function PlayerDetailModal({
                     className="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm px-4 py-2 rounded-lg transition active:scale-95 shrink-0 cursor-pointer flex items-center gap-1.5"
                   >
                     {!isAdminMode && <Lock className="w-3.5 h-3.5 text-emerald-200" />}
-                    <span>Einzahlen</span>
+                    <span>Einzahlen ({effectiveTeam})</span>
                   </button>
 
                   {balance > 0 && (
@@ -517,7 +623,43 @@ export default function PlayerDetailModal({
           {/* HISTORY TAB */}
           {activeSubTab === 'history' && (
             <div className="space-y-3">
-              <h3 className="text-xs uppercase font-extrabold text-slate-500 tracking-wider">Buchungsverlauf von {player.name}</h3>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="text-xs uppercase font-extrabold text-slate-500 tracking-wider">
+                  Buchungsverlauf von {player.name}
+                </h3>
+                {isMultiTeam && (
+                  <div className="flex gap-1 text-[10px] font-bold bg-slate-100 p-1 rounded-lg border border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setHistoryTeamFilter('all')}
+                      className={`px-2 py-0.5 rounded cursor-pointer transition ${
+                        historyTeamFilter === 'all' ? 'bg-slate-800 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Alle Teams
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHistoryTeamFilter('Herren 1')}
+                      className={`px-2 py-0.5 rounded cursor-pointer transition ${
+                        historyTeamFilter === 'Herren 1' ? 'bg-[#FF6B00] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Herren 1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setHistoryTeamFilter('Herren 2')}
+                      className={`px-2 py-0.5 rounded cursor-pointer transition ${
+                        historyTeamFilter === 'Herren 2' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Herren 2
+                    </button>
+                  </div>
+                )}
+              </div>
+
               {playerTransactions.length === 0 ? (
                 <div className="text-center py-8 bg-slate-50 border border-slate-150 rounded-2xl text-slate-400 text-sm">
                   Keine Transaktionen für diesen Spieler gefunden.
@@ -530,7 +672,7 @@ export default function PlayerDetailModal({
                       className="flex justify-between items-center p-3 bg-slate-50/50 border border-slate-100 rounded-xl"
                     >
                       <div>
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span
                             className={`w-2.5 h-2.5 rounded-full ${
                               tx.type === 'drink'
@@ -547,6 +689,13 @@ export default function PlayerDetailModal({
                           {tx.quantity > 1 && (
                             <span className="text-xs bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono">
                               {tx.quantity}x
+                            </span>
+                          )}
+                          {tx.team && (
+                            <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${
+                              tx.team === 'Herren 1' ? 'bg-orange-100 text-orange-800 border border-orange-200' : 'bg-blue-100 text-blue-800 border border-blue-200'
+                            }`}>
+                              {tx.team === 'Herren 1' ? 'H1' : 'H2'}
                             </span>
                           )}
                         </div>

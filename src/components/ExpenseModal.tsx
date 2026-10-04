@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Expense } from '../types';
+import { Expense, Team } from '../types';
 import { 
   X, 
   Coins, 
@@ -20,7 +20,9 @@ interface ExpenseModalProps {
   expenses: Expense[];
   onAddExpense: (expense: Omit<Expense, 'id'>) => void;
   onDeleteExpense: (id: string) => void;
-  totalPaid: number;
+  h1Paid: number;
+  h2Paid: number;
+  defaultTeam?: Team;
   manualCashAdjustment?: number;
   isAdminMode: boolean;
   setIsAdminMode: (isAdmin: boolean) => void;
@@ -32,7 +34,9 @@ export default function ExpenseModal({
   expenses,
   onAddExpense,
   onDeleteExpense,
-  totalPaid,
+  h1Paid,
+  h2Paid,
+  defaultTeam = 'Herren 1',
   manualCashAdjustment = 0,
   isAdminMode,
   setIsAdminMode
@@ -42,6 +46,8 @@ export default function ExpenseModal({
   const [amountStr, setAmountStr] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [notes, setNotes] = useState('');
+  const [expenseTeam, setExpenseTeam] = useState<Team>(defaultTeam);
+  const [historyFilterTeam, setHistoryFilterTeam] = useState<'all' | 'Herren 1' | 'Herren 2'>('all');
   
   // Admin simulation state
   const [pinInput, setPinInput] = useState('');
@@ -50,8 +56,12 @@ export default function ExpenseModal({
 
   if (!isOpen) return null;
 
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-  const netCash = totalPaid - totalExpenses + manualCashAdjustment;
+  const h1Expenses = expenses.filter(e => (e.team || 'Herren 1') === 'Herren 1').reduce((sum, e) => sum + e.amount, 0);
+  const h2Expenses = expenses.filter(e => e.team === 'Herren 2').reduce((sum, e) => sum + e.amount, 0);
+
+  const h1Net = Number((h1Paid - h1Expenses).toFixed(2));
+  const h2Net = Number((h2Paid - h2Expenses).toFixed(2));
+  const totalNet = Number((h1Net + h2Net + manualCashAdjustment).toFixed(2));
 
   const handleAdminToggle = () => {
     if (isAdminMode) {
@@ -87,7 +97,8 @@ export default function ExpenseModal({
       amount,
       date,
       notes: notes.trim() || undefined,
-      createdBy: 'Admin'
+      createdBy: 'Admin',
+      team: expenseTeam
     });
 
     // Reset fields
@@ -96,6 +107,11 @@ export default function ExpenseModal({
     setNotes('');
     setDate(new Date().toISOString().split('T')[0]);
   };
+
+  const filteredExpenses = expenses.filter(e => {
+    if (historyFilterTeam === 'all') return true;
+    return (e.team || 'Herren 1') === historyFilterTeam;
+  });
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in" id="expense-modal-backdrop">
@@ -112,7 +128,7 @@ export default function ExpenseModal({
             </div>
             <div>
               <h2 className="text-lg font-black text-slate-900 tracking-tight">Kassenbestand &amp; Ausgaben</h2>
-              <p className="text-xs text-slate-500">Transparente Übersicht aller Vereinsausgaben</p>
+              <p className="text-xs text-slate-500">2 getrennte Mannschaftskassen für Herren 1 &amp; Herren 2</p>
             </div>
           </div>
           <button 
@@ -125,28 +141,50 @@ export default function ExpenseModal({
 
         {/* Scrollable Content */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          {/* Cash Register Ledger Concept */}
-          <div className="bg-slate-50 border border-slate-200/60 rounded-2xl p-5 grid grid-cols-3 gap-2 text-center relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-100/10 rounded-full blur-2xl"></div>
-            
-            <div className="space-y-1 border-r border-slate-200/60">
-              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Einnahmen (Ist)</span>
-              <p className="text-base sm:text-lg font-black text-slate-700 font-mono">+{totalPaid.toFixed(2)} €</p>
-              <span className="text-[9px] text-slate-400 block">Eingezahlte Beiträge</span>
+          {/* 2 Separate Cash Register Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Kasse Herren 1 */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase font-extrabold text-[#FF6B00] tracking-wider flex items-center gap-1.5">
+                  🏀 Kasse Herren 1
+                </span>
+                <span className={`text-base font-black font-mono px-2 py-0.5 rounded-lg border ${
+                  h1Net >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}>
+                  {h1Net.toFixed(2)} €
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[11px] font-mono pt-1 border-t border-slate-200/60">
+                <div className="text-slate-500">
+                  Eingezahlt: <span className="font-bold text-slate-800">+{h1Paid.toFixed(2)} €</span>
+                </div>
+                <div className="text-slate-500 text-right">
+                  Ausgaben: <span className="font-bold text-rose-600">-{h1Expenses.toFixed(2)} €</span>
+                </div>
+              </div>
             </div>
 
-            <div className="space-y-1 border-r border-slate-200/60">
-              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Ausgaben</span>
-              <p className="text-base sm:text-lg font-black text-rose-600 font-mono">-{totalExpenses.toFixed(2)} €</p>
-              <span className="text-[9px] text-slate-400 block">{expenses.length} Buchungen</span>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-[9px] uppercase font-bold text-emerald-600 block tracking-wider">Kassenbestand</span>
-              <p className={`text-base sm:text-xl font-black font-mono ${netCash >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                {netCash.toFixed(2)} €
-              </p>
-              <span className="text-[9px] text-emerald-600 font-semibold block">Tatsächliches Geld</span>
+            {/* Kasse Herren 2 */}
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 space-y-2 relative overflow-hidden">
+              <div className="flex items-center justify-between">
+                <span className="text-xs uppercase font-extrabold text-blue-600 tracking-wider flex items-center gap-1.5">
+                  🏀 Kasse Herren 2
+                </span>
+                <span className={`text-base font-black font-mono px-2 py-0.5 rounded-lg border ${
+                  h2Net >= 0 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-700 border-rose-200'
+                }`}>
+                  {h2Net.toFixed(2)} €
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[11px] font-mono pt-1 border-t border-slate-200/60">
+                <div className="text-slate-500">
+                  Eingezahlt: <span className="font-bold text-slate-800">+{h2Paid.toFixed(2)} €</span>
+                </div>
+                <div className="text-slate-500 text-right">
+                  Ausgaben: <span className="font-bold text-rose-600">-{h2Expenses.toFixed(2)} €</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -171,8 +209,8 @@ export default function ExpenseModal({
                   </h4>
                   <p className="text-[11px] text-slate-500 mt-0.5">
                     {isAdminMode 
-                      ? 'Du kannst neue Ausgaben eintragen und bestehende Buchungen löschen.' 
-                      : 'Du siehst alle verbuchten Ausgaben. Um selbst Ausgaben hinzuzufügen, aktiviere den Admin-Modus.'}
+                      ? 'Du kannst neue Ausgaben für Herren 1 oder Herren 2 eintragen und löschen.' 
+                      : 'Du siehst alle verbuchten Ausgaben beider Kassen.'}
                   </p>
                 </div>
               </div>
@@ -233,12 +271,43 @@ export default function ExpenseModal({
               </h3>
               
               <form onSubmit={handleSubmit} className="space-y-3">
+                {/* Team Selection for Expense */}
+                <div>
+                  <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+                    Aus welcher Mannschaftskasse bezahlt?
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setExpenseTeam('Herren 1')}
+                      className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                        expenseTeam === 'Herren 1'
+                          ? 'border-[#FF6B00] bg-orange-50 text-[#FF6B00] shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      🏀 Kasse Herren 1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setExpenseTeam('Herren 2')}
+                      className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold transition-all cursor-pointer text-center ${
+                        expenseTeam === 'Herren 2'
+                          ? 'border-blue-500 bg-blue-50 text-blue-600 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      🏀 Kasse Herren 2
+                    </button>
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="sm:col-span-2">
                     <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Zweck / Beschreibung</label>
                     <input
                       type="text"
-                      placeholder="z.B. 3 Kisten Bier gekauft, Schiri-Gebühr..."
+                      placeholder="z.B. 3 Kisten Bier gekauft, Bälle..."
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
                       required
@@ -275,7 +344,7 @@ export default function ExpenseModal({
                     <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Bemerkung (Optional)</label>
                     <input
                       type="text"
-                      placeholder="z.B. Beleg bei Florian hinterlegt"
+                      placeholder="z.B. Beleg bei Trainer hinterlegt"
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
                       className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-[#FF6B00]"
@@ -289,7 +358,7 @@ export default function ExpenseModal({
                     className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition cursor-pointer shadow-xs flex items-center gap-1"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    Ausgabe buchen
+                    Ausgabe für {expenseTeam} buchen
                   </button>
                 </div>
               </form>
@@ -298,55 +367,91 @@ export default function ExpenseModal({
 
           {/* List of recorded expenses */}
           <div className="space-y-3">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-              Buchungsposten / Verlauf ({expenses.length})
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                Buchungsposten / Verlauf ({filteredExpenses.length})
+              </h3>
+              
+              {/* Filter tabs */}
+              <div className="flex gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[10px] font-bold">
+                <button
+                  type="button"
+                  onClick={() => setHistoryFilterTeam('all')}
+                  className={`px-2 py-1 rounded-md transition ${historyFilterTeam === 'all' ? 'bg-white text-slate-800 shadow-xs' : 'text-slate-500'}`}
+                >
+                  Alle Kassen
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryFilterTeam('Herren 1')}
+                  className={`px-2 py-1 rounded-md transition ${historyFilterTeam === 'Herren 1' ? 'bg-[#FF6B00] text-white shadow-xs' : 'text-slate-500'}`}
+                >
+                  Herren 1
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setHistoryFilterTeam('Herren 2')}
+                  className={`px-2 py-1 rounded-md transition ${historyFilterTeam === 'Herren 2' ? 'bg-blue-600 text-white shadow-xs' : 'text-slate-500'}`}
+                >
+                  Herren 2
+                </button>
+              </div>
+            </div>
 
-            {expenses.length === 0 ? (
+            {filteredExpenses.length === 0 ? (
               <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl p-4 bg-slate-50/30">
                 <TrendingDown className="w-6 h-6 text-slate-300 mx-auto mb-2" />
-                <p className="text-xs font-semibold text-slate-500">Noch keine Ausgaben erfasst</p>
+                <p className="text-xs font-semibold text-slate-500">Keine Ausgaben in dieser Ansicht</p>
                 <p className="text-[10px] text-slate-400 mt-1">
-                  Aktiviere den Admin-Modus, um die erste Ausgabe (z.B. Getränkeeinkauf) zu verbuchen.
+                  Aktiviere den Admin-Modus, um eine Ausgabe für die Mannschaftskasse zu verbuchen.
                 </p>
               </div>
             ) : (
               <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-                {[...expenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((exp) => (
+                {[...filteredExpenses].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((exp) => (
                   <div 
                     key={exp.id}
                     className="flex justify-between items-center bg-white border border-slate-100 hover:border-slate-200 rounded-xl p-3 shadow-3xs transition"
                   >
                     <div className="flex items-start gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-500 shrink-0 mt-0.5">
+                      <div className="p-2 bg-rose-50 text-rose-600 rounded-lg shrink-0 mt-0.5">
                         <TrendingDown className="w-4 h-4" />
                       </div>
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-800 truncate">{exp.title}</p>
-                        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-bold text-xs text-slate-800 truncate">{exp.title}</span>
+                          <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
+                            (exp.team || 'Herren 1') === 'Herren 1'
+                              ? 'bg-orange-50 text-[#FF6B00] border-orange-200'
+                              : 'bg-blue-50 text-blue-600 border-blue-200'
+                          }`}>
+                            {exp.team || 'Herren 1'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-slate-400 mt-0.5">
                           <span className="flex items-center gap-1">
                             <Calendar className="w-3 h-3" />
-                            {new Date(exp.date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                            {new Date(exp.date).toLocaleDateString('de-DE')}
                           </span>
                           {exp.notes && (
-                            <>
-                              <span>•</span>
-                              <span className="truncate max-w-[150px] italic">"{exp.notes}"</span>
-                            </>
+                            <span className="truncate max-w-[200px]" title={exp.notes}>
+                              • {exp.notes}
+                            </span>
                           )}
                         </div>
                       </div>
                     </div>
 
                     <div className="flex items-center gap-3">
-                      <span className="font-mono text-xs font-black text-rose-600">
+                      <span className="font-black text-rose-600 font-mono text-sm">
                         -{exp.amount.toFixed(2)} €
                       </span>
                       {isAdminMode && (
                         <button
+                          type="button"
                           onClick={() => onDeleteExpense(exp.id)}
-                          title="Löschen"
-                          className="p-1 text-slate-300 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition cursor-pointer"
+                          className="p-1.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                          title="Ausgabe löschen"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -363,10 +468,11 @@ export default function ExpenseModal({
         <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center gap-2 text-[10px] text-slate-400">
           <Info className="w-3.5 h-3.5 text-slate-400 shrink-0" />
           <span>
-            Der Kassenbestand aktualisiert sich automatisch bei jeder Einnahme (Mitglieder-Zahlung) und Ausgabe. Alle Daten bleiben sicher im Browser offline gespeichert.
+            Beide Mannschaftskassen werden strikt getrennt geführt. Einnahmen &amp; Ausgaben wirken sich nur auf die jeweilige Kasse aus.
           </span>
         </div>
       </div>
     </div>
   );
 }
+

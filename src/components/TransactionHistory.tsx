@@ -5,12 +5,21 @@ import { FileText, Search, Trash2, Calendar, RefreshCw, X, AlertTriangle, ArrowD
 interface TransactionHistoryProps {
   transactions: Transaction[];
   onRevertTransaction: (id: string) => void;
+  selectedTeam?: 'All' | 'Herren 1' | 'Herren 2';
 }
 
-export default function TransactionHistory({ transactions, onRevertTransaction }: TransactionHistoryProps) {
+export default function TransactionHistory({ transactions, onRevertTransaction, selectedTeam }: TransactionHistoryProps) {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'drink' | 'fine' | 'payment'>('all');
+  const [filterTeam, setFilterTeam] = useState<'all' | 'Herren 1' | 'Herren 2'>('all');
   const [showStornoConfirm, setShowStornoConfirm] = useState<string | null>(null);
+
+  // Sync with prop if passed
+  React.useEffect(() => {
+    if (selectedTeam && selectedTeam !== 'All') {
+      setFilterTeam(selectedTeam);
+    }
+  }, [selectedTeam]);
 
   // Filter transactions
   const filteredTransactions = transactions
@@ -18,7 +27,8 @@ export default function TransactionHistory({ transactions, onRevertTransaction }
       const matchesSearch = tx.playerName.toLowerCase().includes(search.toLowerCase()) || 
                             tx.itemName.toLowerCase().includes(search.toLowerCase());
       const matchesType = filterType === 'all' || tx.type === filterType;
-      return matchesSearch && matchesType;
+      const matchesTeam = filterTeam === 'all' || (tx.team || 'Herren 1') === filterTeam;
+      return matchesSearch && matchesType && matchesTeam;
     })
     // Sort by date newest first
     .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
@@ -81,6 +91,38 @@ export default function TransactionHistory({ transactions, onRevertTransaction }
         </div>
       </div>
 
+      {/* Team Filter Row */}
+      <div className="flex items-center gap-1.5 mb-3 bg-slate-50 p-1.5 rounded-xl border border-slate-200/60">
+        <span className="text-[10px] uppercase font-bold text-slate-400 px-2 shrink-0">Kasse / Team:</span>
+        <button
+          type="button"
+          onClick={() => setFilterTeam('all')}
+          className={`flex-1 py-1 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+            filterTeam === 'all' ? 'bg-slate-800 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 bg-white/60'
+          }`}
+        >
+          Alle Teams
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTeam('Herren 1')}
+          className={`flex-1 py-1 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+            filterTeam === 'Herren 1' ? 'bg-[#FF6B00] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 bg-white/60'
+          }`}
+        >
+          🏀 Herren 1
+        </button>
+        <button
+          type="button"
+          onClick={() => setFilterTeam('Herren 2')}
+          className={`flex-1 py-1 px-2 rounded-lg text-xs font-bold transition cursor-pointer ${
+            filterTeam === 'Herren 2' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 bg-white/60'
+          }`}
+        >
+          🏀 Herren 2
+        </button>
+      </div>
+
       {/* Transaction List */}
       <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1" id="transactions-list">
         {displayedTransactions.length === 0 ? (
@@ -107,9 +149,18 @@ export default function TransactionHistory({ transactions, onRevertTransaction }
                   </div>
 
                   <div className="min-w-0">
-                    <span className="text-xs font-bold text-slate-900 block">
-                      {tx.playerName}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-bold text-slate-900">
+                        {tx.playerName}
+                      </span>
+                      {tx.team && (
+                        <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded ${
+                          tx.team === 'Herren 1' ? 'bg-orange-100 text-orange-800 border border-orange-200' : 'bg-blue-100 text-blue-800 border border-blue-200'
+                        }`}>
+                          {tx.team === 'Herren 1' ? 'H1' : 'H2'}
+                        </span>
+                      )}
+                    </div>
                     <span className="text-[10px] text-slate-500 flex items-center gap-1.5 mt-0.5">
                       <span>{tx.type === 'drink' ? '🍺' : tx.type === 'fine' ? '📜' : '💵'} {tx.itemName}</span>
                       {tx.quantity > 1 && (

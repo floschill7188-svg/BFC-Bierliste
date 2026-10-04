@@ -1,20 +1,28 @@
-import React, { useState } from 'react';
-import { Player, Drink, Fine } from '../types';
+import React, { useState, useEffect } from 'react';
+import { Player, Drink, Fine, Team } from '../types';
 import { Zap, Beer, AlertTriangle, Users, Check, Circle, CheckCircle2, Lock } from 'lucide-react';
 
 interface QuickBookingProps {
   players: Player[];
   drinks: Drink[];
   fines: Fine[];
-  onBulkBook: (playerIds: string[], type: 'drink' | 'fine', itemId: string) => void;
+  defaultTeam?: Team;
+  onBulkBook: (playerIds: string[], type: 'drink' | 'fine', itemId: string, team?: Team) => void;
   isAuthorized: boolean;
   isAdminMode: boolean;
 }
 
-export default function QuickBooking({ players, drinks, fines, onBulkBook, isAuthorized, isAdminMode }: QuickBookingProps) {
+export default function QuickBooking({ players, drinks, fines, defaultTeam = 'Herren 1', onBulkBook, isAuthorized, isAdminMode }: QuickBookingProps) {
   const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
   const [bookingType, setBookingType] = useState<'drink' | 'fine'>('drink');
   const [selectedItemId, setSelectedItemId] = useState<string>('');
+  const [bulkTeam, setBulkTeam] = useState<Team>(defaultTeam === 'Herren 2' ? 'Herren 2' : 'Herren 1');
+
+  useEffect(() => {
+    if (defaultTeam === 'Herren 1' || defaultTeam === 'Herren 2') {
+      setBulkTeam(defaultTeam);
+    }
+  }, [defaultTeam]);
 
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
@@ -51,7 +59,7 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook, isAut
       return;
     }
 
-    onBulkBook(selectedPlayerIds, bookingType, selectedItemId);
+    onBulkBook(selectedPlayerIds, bookingType, selectedItemId, bulkTeam);
 
     const hasAccess = bookingType === 'drink' ? isAuthorized : isAdminMode;
 
@@ -62,7 +70,7 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook, isAut
           : fines.find((f) => f.id === selectedItemId)?.name;
 
       setMessage({
-        text: `Erfolgreich "${itemName}" für ${selectedPlayerIds.length} Spieler gebucht!`,
+        text: `Erfolgreich "${itemName}" für ${selectedPlayerIds.length} Spieler in Kasse "${bulkTeam}" gebucht!`,
         isError: false,
       });
 
@@ -105,6 +113,29 @@ export default function QuickBooking({ players, drinks, fines, onBulkBook, isAut
       )}
 
       <form onSubmit={handleBook} className="space-y-4">
+        {/* Team Selector */}
+        <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl border border-slate-200/60">
+          <span className="text-[10px] uppercase font-bold text-slate-400 px-2 shrink-0">Kasse:</span>
+          <button
+            type="button"
+            onClick={() => setBulkTeam('Herren 1')}
+            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1 ${
+              bulkTeam === 'Herren 1' ? 'bg-[#FF6B00] text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 bg-white/60'
+            }`}
+          >
+            <span>🏀 Herren 1</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setBulkTeam('Herren 2')}
+            className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1 ${
+              bulkTeam === 'Herren 2' ? 'bg-blue-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900 bg-white/60'
+            }`}
+          >
+            <span>🏀 Herren 2</span>
+          </button>
+        </div>
+
         {/* Step 1: Select Players */}
         <div>
           <div className="flex justify-between items-center mb-2">

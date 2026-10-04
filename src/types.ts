@@ -1,3 +1,5 @@
+export type Team = 'Herren 1' | 'Herren 2';
+
 export interface Drink {
   id: string;
   name: string;
@@ -13,16 +15,26 @@ export interface Fine {
   points?: number; // Strafpunkte (penalty points)
 }
 
+export interface PlayerTeamStats {
+  drinksCount: { [drinkId: string]: number };
+  finesCount: { [fineId: string]: number };
+  totalPaid: number;
+}
+
 export interface Player {
   id: string;
   name: string;
   email?: string; // E-Mail address for weekly updates
   number?: string; // Trikotnummer (jersey number)
-  drinksCount: { [drinkId: string]: number }; // drinkId -> quantity
-  finesCount: { [fineId: string]: number }; // fineId -> quantity
-  totalPaid: number; // total money paid/settled by this player
-  team?: 'Herren 1' | 'Herren 2'; // Mannschafts-Filter (Legacy/Single team)
-  teams?: ('Herren 1' | 'Herren 2')[]; // Mannschafts-Filter (Multi-team)
+  drinksCount: { [drinkId: string]: number }; // drinkId -> quantity (combined / legacy)
+  finesCount: { [fineId: string]: number }; // fineId -> quantity (combined / legacy)
+  totalPaid: number; // total money paid/settled by this player (combined / legacy)
+  team?: Team; // Mannschafts-Filter (Legacy/Single team)
+  teams?: Team[]; // Mannschafts-Filter (Multi-team)
+  teamStats?: {
+    'Herren 1'?: PlayerTeamStats;
+    'Herren 2'?: PlayerTeamStats;
+  };
 }
 
 export interface Transaction {
@@ -35,6 +47,7 @@ export interface Transaction {
   amount: number; // cost per item or payment amount
   quantity: number; // e.g. 1 for fines, dynamic for drinks, or 1 for payments
   timestamp: string; // ISO string
+  team?: Team; // Team this transaction / ledger belongs to
 }
 
 export interface Expense {
@@ -44,6 +57,7 @@ export interface Expense {
   date: string;
   notes?: string;
   createdBy?: string; // e.g., 'Admin' / 'Vorstand'
+  team?: Team; // Team cash register this expense was paid from
 }
 
 export interface ClubStats {

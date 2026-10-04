@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule, ScheduleRule } from './types';
+import { Player, Drink, Fine, Transaction, ClubStats, Expense, NotificationSchedule, ScheduleRule, Team } from './types';
 import { DEFAULT_DRINKS, DEFAULT_FINES, DEMO_PLAYERS, DEMO_EXPENSES } from './data/defaults';
+import { calculateCashBoxStats, getPlayerTeamBalance } from './utils/balance';
 import PlayerCard from './components/PlayerCard';
 import { onSnapshot, collection, doc, setDoc, runTransaction, deleteDoc, getDocs, writeBatch } from 'firebase/firestore';
 import { db, initAuth } from './firebase';
@@ -314,9 +315,21 @@ export default function App() {
     fineId?: string;
     playerIds?: string[];
     itemId?: string;
+    team?: Team;
   } | null>(null);
   const [adminPromptPin, setAdminPromptPin] = useState('');
   const [adminPromptError, setAdminPromptError] = useState('');
+
+  // Prompt for players in multiple teams when booking without specified team
+  const [teamChoicePrompt, setTeamChoicePrompt] = useState<{
+    type: 'drink' | 'fine';
+    playerId: string;
+    playerName: string;
+    itemId: string;
+    itemName: string;
+    itemPrice: number;
+    availableTeams: Team[];
+  } | null>(null);
   
   // Navigation & Filter states
   const [searchQuery, setSearchQuery] = useState('');
@@ -950,26 +963,42 @@ export default function App() {
     setIsNewPlayerModalOpen(false);
   };
 
-  // Quick record drink from PlayerCard
-  const executeRecordDrink = (playerId: string, drinkId: string) => {
+  // Quick record drink from PlayerCard or Modal
+  const executeRecordDrink = (playerId: string, drinkId: string, team?: Team) => {
     const drink = drinks.find(d => d.id === drinkId);
     if (!drink) return;
 
-    const updatedPlayers = players.map(player => {
-      if (player.id === playerId) {
-        const currentQty = player.drinksCount[drinkId] || 0;
+    const player = players.find(p => p.id === playerId);
+    const targetTeam: Team = team || (player?.teams?.length === 1 ? player.teams[0] : (selectedTeam !== 'All' ? selectedTeam : 'Herren 1'));
+
+    const updatedPlayers = players.map(p => {
+      if (p.id === playerId) {
+        const currentQty = p.drinksCount[drinkId] || 0;
+        const currentTeamStats = p.teamStats || {};
+        const currentHStats = currentTeamStats[targetTeam] || { drinksCount: {}, finesCount: {}, totalPaid: 0 };
+        const currentHTeamQty = currentHStats.drinksCount[drinkId] || 0;
+
         return {
-          ...player,
+          ...p,
           drinksCount: {
-            ...player.drinksCount,
+            ...p.drinksCount,
             [drinkId]: currentQty + 1
+          },
+          teamStats: {
+            ...currentTeamStats,
+            [targetTeam]: {
+              ...currentHStats,
+              drinksCount: {
+                ...currentHStats.drinksCount,
+                [drinkId]: currentHTeamQty + 1
+              }
+            }
           }
         };
       }
-      return player;
+      return p;
     });
 
-    const player = players.find(p => p.id === playerId);
     const newTx: Transaction = {
       id: 'tx_' + Date.now() + Math.random().toString(36).substring(2, 5),
       playerId,
@@ -979,7 +1008,8 @@ export default function App() {
       itemName: drink.name,
       amount: drink.price,
       quantity: 1,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      team: targetTeam
     };
 
     saveState(updatedPlayers, drinks, fines, [newTx, ...transactions]);
@@ -990,45 +1020,91 @@ export default function App() {
     }
   };
 
-  const handleRecordDrink = (playerId: string, drinkId: string) => {
+  const handleRecordDrink = (playerId: string, drinkId: string, team?: Team) => {
+    const player = players.find(p => p.id === playerId);
+    const drink = drinks.find(d => d.id === drinkId);
+    if (!player || !drink) return;
+
+    // Multi-team prompt: if player is in multiple teams and no team is provided, always ask
+    const isMultiTeam = (player.teams && player.teams.length > 1) || (player.teams?.includes('Herren 1') && player.teams?.includes('Herren 2'));
+    if (!team && isMultiTeam) {
+      setTeamChoicePrompt({
+        type: 'drink',
+        playerId,
+        playerName: player.name,
+        itemId: drinkId,
+        itemName: drink.name,
+        itemPrice: drink.price,
+        availableTeams: player.teams || ['Herren 1', 'Herren 2']
+      });
+      return;
+    }
+
+    const effectiveTeam: Team = team || (player.teams?.[0] || player.team || 'Herren 1');
+
     if (isAdminMode || isBookingAuthorized) {
-      executeRecordDrink(playerId, drinkId);
+      executeRecordDrink(playerId, drinkId, effectiveTeam);
     } else {
-      setPendingAdminAction({ type: 'record_drink', playerId, itemId: drinkId });
+      setPendingAdminAction({ type: 'record_drink', playerId, itemId: drinkId, team: effectiveTeam });
       setAdminPromptPin('');
       setAdminPromptError('');
     }
   };
 
   // Remove drink booking (decrement counter + add offset tx or modify log)
-  const executeRemoveDrink = (playerId: string, drinkId: string) => {
+  const executeRemoveDrink = (playerId: string, drinkId: string, team?: Team) => {
     const drink = drinks.find(d => d.id === drinkId);
     if (!drink) return;
 
+    const player = players.find(p => p.id === playerId);
+    const targetTeam: Team = team || (player?.teams?.length === 1 ? player.teams[0] : (selectedTeam !== 'All' ? selectedTeam : 'Herren 1'));
+
     let removed = false;
-    const updatedPlayers = players.map(player => {
-      if (player.id === playerId) {
-        const currentQty = player.drinksCount[drinkId] || 0;
-        if (currentQty > 0) {
+    const updatedPlayers = players.map(p => {
+      if (p.id === playerId) {
+        const currentQty = p.drinksCount[drinkId] || 0;
+        const currentTeamStats = p.teamStats || {};
+        const currentHStats = currentTeamStats[targetTeam] || { drinksCount: {}, finesCount: {}, totalPaid: 0 };
+        const currentHTeamQty = currentHStats.drinksCount[drinkId] || 0;
+
+        if (currentQty > 0 || currentHTeamQty > 0) {
           removed = true;
-          const newQty = currentQty - 1;
-          const newDrinksCount = { ...player.drinksCount };
+          const newQty = Math.max(0, currentQty - 1);
+          const newDrinksCount = { ...p.drinksCount };
           if (newQty === 0) {
             delete newDrinksCount[drinkId];
           } else {
             newDrinksCount[drinkId] = newQty;
           }
-          return { ...player, drinksCount: newDrinksCount };
+
+          const newHTeamQty = Math.max(0, currentHTeamQty - 1);
+          const newHTeamDrinksCount = { ...currentHStats.drinksCount };
+          if (newHTeamQty === 0) {
+            delete newHTeamDrinksCount[drinkId];
+          } else {
+            newHTeamDrinksCount[drinkId] = newHTeamQty;
+          }
+
+          return {
+            ...p,
+            drinksCount: newDrinksCount,
+            teamStats: {
+              ...currentTeamStats,
+              [targetTeam]: {
+                ...currentHStats,
+                drinksCount: newHTeamDrinksCount
+              }
+            }
+          };
         }
       }
-      return player;
+      return p;
     });
 
     if (!removed) return;
 
-    // To preserve ledger history without polluting with negative logs, 
-    // we find and remove the most recent drink transaction for this player and drink
-    const txIndex = transactions.findIndex(t => t.playerId === playerId && t.itemId === drinkId && t.type === 'drink');
+    // Find and remove the most recent drink transaction for this player, drink and team
+    const txIndex = transactions.findIndex(t => t.playerId === playerId && t.itemId === drinkId && t.type === 'drink' && (t.team || 'Herren 1') === targetTeam);
     let updatedTx = [...transactions];
     if (txIndex !== -1) {
       updatedTx.splice(txIndex, 1);
@@ -1037,13 +1113,14 @@ export default function App() {
       updatedTx.unshift({
         id: 'tx_rev_' + Date.now(),
         playerId,
-        playerName: players.find(p => p.id === playerId)?.name || '',
+        playerName: player?.name || '',
         type: 'drink',
         itemId: drinkId,
         itemName: `${drink.name} (Korrektur)`,
         amount: -drink.price,
         quantity: 1,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        team: targetTeam
       });
     }
 
@@ -1055,36 +1132,52 @@ export default function App() {
     }
   };
 
-  const handleRemoveDrink = (playerId: string, drinkId: string) => {
+  const handleRemoveDrink = (playerId: string, drinkId: string, team?: Team) => {
     if (isAdminMode || isBookingAuthorized) {
-      executeRemoveDrink(playerId, drinkId);
+      executeRemoveDrink(playerId, drinkId, team);
     } else {
-      setPendingAdminAction({ type: 'remove_drink', playerId, itemId: drinkId });
+      setPendingAdminAction({ type: 'remove_drink', playerId, itemId: drinkId, team });
       setAdminPromptPin('');
       setAdminPromptError('');
     }
   };
 
   // Execute actual fine recording
-  const executeRecordFine = (playerId: string, fineId: string) => {
+  const executeRecordFine = (playerId: string, fineId: string, team?: Team) => {
     const fine = fines.find(f => f.id === fineId);
     if (!fine) return;
 
-    const updatedPlayers = players.map(player => {
-      if (player.id === playerId) {
-        const currentQty = player.finesCount[fineId] || 0;
+    const player = players.find(p => p.id === playerId);
+    const targetTeam: Team = team || (player?.teams?.length === 1 ? player.teams[0] : (selectedTeam !== 'All' ? selectedTeam : 'Herren 1'));
+
+    const updatedPlayers = players.map(p => {
+      if (p.id === playerId) {
+        const currentQty = p.finesCount[fineId] || 0;
+        const currentTeamStats = p.teamStats || {};
+        const currentHStats = currentTeamStats[targetTeam] || { drinksCount: {}, finesCount: {}, totalPaid: 0 };
+        const currentHTeamQty = currentHStats.finesCount[fineId] || 0;
+
         return {
-          ...player,
+          ...p,
           finesCount: {
-            ...player.finesCount,
+            ...p.finesCount,
             [fineId]: currentQty + 1
+          },
+          teamStats: {
+            ...currentTeamStats,
+            [targetTeam]: {
+              ...currentHStats,
+              finesCount: {
+                ...currentHStats.finesCount,
+                [fineId]: currentHTeamQty + 1
+              }
+            }
           }
         };
       }
-      return player;
+      return p;
     });
 
-    const player = players.find(p => p.id === playerId);
     const newTx: Transaction = {
       id: 'tx_' + Date.now() + Math.random().toString(36).substring(2, 5),
       playerId,
@@ -1094,7 +1187,8 @@ export default function App() {
       itemName: fine.name,
       amount: fine.amount,
       quantity: 1,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      team: targetTeam
     };
 
     saveState(updatedPlayers, drinks, fines, [newTx, ...transactions]);
@@ -1106,43 +1200,90 @@ export default function App() {
   };
 
   // Quick record fine (handles authorization check)
-  const handleRecordFine = (playerId: string, fineId: string) => {
+  const handleRecordFine = (playerId: string, fineId: string, team?: Team) => {
+    const player = players.find(p => p.id === playerId);
+    const fine = fines.find(f => f.id === fineId);
+    if (!player || !fine) return;
+
+    // Multi-team prompt: if player is in multiple teams and no team is provided, always ask
+    const isMultiTeam = (player.teams && player.teams.length > 1) || (player.teams?.includes('Herren 1') && player.teams?.includes('Herren 2'));
+    if (!team && isMultiTeam) {
+      setTeamChoicePrompt({
+        type: 'fine',
+        playerId,
+        playerName: player.name,
+        itemId: fineId,
+        itemName: fine.name,
+        itemPrice: fine.amount,
+        availableTeams: player.teams || ['Herren 1', 'Herren 2']
+      });
+      return;
+    }
+
+    const effectiveTeam: Team = team || (player.teams?.[0] || player.team || 'Herren 1');
+
     if (isAdminMode) {
-      executeRecordFine(playerId, fineId);
+      executeRecordFine(playerId, fineId, effectiveTeam);
     } else {
-      setPendingAdminAction({ type: 'record_fine', playerId, fineId });
+      setPendingAdminAction({ type: 'record_fine', playerId, fineId, team: effectiveTeam });
       setAdminPromptPin('');
       setAdminPromptError('');
     }
   };
 
   // Execute actual fine removal
-  const executeRemoveFine = (playerId: string, fineId: string) => {
+  const executeRemoveFine = (playerId: string, fineId: string, team?: Team) => {
     const fine = fines.find(f => f.id === fineId);
     if (!fine) return;
 
+    const player = players.find(p => p.id === playerId);
+    const targetTeam: Team = team || (player?.teams?.length === 1 ? player.teams[0] : (selectedTeam !== 'All' ? selectedTeam : 'Herren 1'));
+
     let removed = false;
-    const updatedPlayers = players.map(player => {
-      if (player.id === playerId) {
-        const currentQty = player.finesCount[fineId] || 0;
-        if (currentQty > 0) {
+    const updatedPlayers = players.map(p => {
+      if (p.id === playerId) {
+        const currentQty = p.finesCount[fineId] || 0;
+        const currentTeamStats = p.teamStats || {};
+        const currentHStats = currentTeamStats[targetTeam] || { drinksCount: {}, finesCount: {}, totalPaid: 0 };
+        const currentHTeamQty = currentHStats.finesCount[fineId] || 0;
+
+        if (currentQty > 0 || currentHTeamQty > 0) {
           removed = true;
-          const newQty = currentQty - 1;
-          const newFinesCount = { ...player.finesCount };
+          const newQty = Math.max(0, currentQty - 1);
+          const newFinesCount = { ...p.finesCount };
           if (newQty === 0) {
             delete newFinesCount[fineId];
           } else {
             newFinesCount[fineId] = newQty;
           }
-          return { ...player, finesCount: newFinesCount };
+
+          const newHTeamQty = Math.max(0, currentHTeamQty - 1);
+          const newHTeamFinesCount = { ...currentHStats.finesCount };
+          if (newHTeamQty === 0) {
+            delete newHTeamFinesCount[fineId];
+          } else {
+            newHTeamFinesCount[fineId] = newHTeamQty;
+          }
+
+          return {
+            ...p,
+            finesCount: newFinesCount,
+            teamStats: {
+              ...currentTeamStats,
+              [targetTeam]: {
+                ...currentHStats,
+                finesCount: newHTeamFinesCount
+              }
+            }
+          };
         }
       }
-      return player;
+      return p;
     });
 
     if (!removed) return;
 
-    const txIndex = transactions.findIndex(t => t.playerId === playerId && t.itemId === fineId && t.type === 'fine');
+    const txIndex = transactions.findIndex(t => t.playerId === playerId && t.itemId === fineId && t.type === 'fine' && (t.team || 'Herren 1') === targetTeam);
     let updatedTx = [...transactions];
     if (txIndex !== -1) {
       updatedTx.splice(txIndex, 1);
@@ -1150,13 +1291,14 @@ export default function App() {
       updatedTx.unshift({
         id: 'tx_rev_fine_' + Date.now(),
         playerId,
-        playerName: players.find(p => p.id === playerId)?.name || '',
+        playerName: player?.name || '',
         type: 'fine',
         itemId: fineId,
         itemName: `${fine.name} (Korrektur)`,
         amount: -fine.amount,
         quantity: 1,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        team: targetTeam
       });
     }
 
@@ -1169,38 +1311,50 @@ export default function App() {
   };
 
   // Decrement fine booking (handles authorization check)
-  const handleRemoveFine = (playerId: string, fineId: string) => {
+  const handleRemoveFine = (playerId: string, fineId: string, team?: Team) => {
     if (isAdminMode) {
-      executeRemoveFine(playerId, fineId);
+      executeRemoveFine(playerId, fineId, team);
     } else {
-      setPendingAdminAction({ type: 'remove_fine', playerId, fineId });
+      setPendingAdminAction({ type: 'remove_fine', playerId, fineId, team });
       setAdminPromptPin('');
       setAdminPromptError('');
     }
   };
 
   // Add partial or full payment (actual execution)
-  const executeRecordPayment = (playerId: string, amount: number) => {
-    const updatedPlayers = players.map(player => {
-      if (player.id === playerId) {
+  const executeRecordPayment = (playerId: string, amount: number, team?: Team) => {
+    const player = players.find(p => p.id === playerId);
+    const targetTeam: Team = team || (player?.teams?.length === 1 ? player.teams[0] : (selectedTeam !== 'All' ? selectedTeam : 'Herren 1'));
+
+    const updatedPlayers = players.map(p => {
+      if (p.id === playerId) {
+        const currentTeamStats = p.teamStats || {};
+        const currentHStats = currentTeamStats[targetTeam] || { drinksCount: {}, finesCount: {}, totalPaid: 0 };
         return {
-          ...player,
-          totalPaid: player.totalPaid + amount
+          ...p,
+          totalPaid: Number((p.totalPaid + amount).toFixed(2)),
+          teamStats: {
+            ...currentTeamStats,
+            [targetTeam]: {
+              ...currentHStats,
+              totalPaid: Number(((currentHStats.totalPaid || 0) + amount).toFixed(2))
+            }
+          }
         };
       }
-      return player;
+      return p;
     });
 
-    const player = players.find(p => p.id === playerId);
     const newTx: Transaction = {
       id: 'tx_pay_' + Date.now(),
       playerId,
       playerName: player?.name || 'Unbekannter Spieler',
       type: 'payment',
-      itemName: 'Einzahlung / Kontostand ausgeglichen',
+      itemName: `Einzahlung (${targetTeam} Kasse)`,
       amount: amount,
       quantity: 1,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      team: targetTeam
     };
 
     saveState(updatedPlayers, drinks, fines, [newTx, ...transactions]);
@@ -1211,11 +1365,11 @@ export default function App() {
     }
   };
 
-  const handleRecordPayment = (playerId: string, amount: number) => {
+  const handleRecordPayment = (playerId: string, amount: number, team?: Team) => {
     if (isAdminMode) {
-      executeRecordPayment(playerId, amount);
+      executeRecordPayment(playerId, amount, team);
     } else {
-      setPendingAdminAction({ type: 'record_payment', playerId, itemId: amount.toString() });
+      setPendingAdminAction({ type: 'record_payment', playerId, itemId: amount.toString(), team });
       setAdminPromptPin('');
       setAdminPromptError('');
     }
@@ -1282,17 +1436,23 @@ export default function App() {
   };
 
   // Execute actual bulk booking
-  const executeBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string) => {
+  const executeBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string, team?: Team) => {
     const item = type === 'drink' ? drinks.find(d => d.id === itemId) : fines.find(f => f.id === itemId);
     if (!item) return;
 
+    const targetTeam: Team = team || (selectedTeam !== 'All' ? selectedTeam : 'Herren 1');
     const newTransactions: Transaction[] = [];
     const timestamp = new Date().toISOString();
 
     const updatedPlayers = players.map(player => {
       if (playerIds.includes(player.id)) {
+        const currentTeamStats = player.teamStats || {};
+        const currentHStats = currentTeamStats[targetTeam] || { drinksCount: {}, finesCount: {}, totalPaid: 0 };
+
         if (type === 'drink') {
           const currentQty = player.drinksCount[itemId] || 0;
+          const currentHTeamQty = currentHStats.drinksCount[itemId] || 0;
+
           newTransactions.push({
             id: `tx_bulk_d_${Date.now()}_${player.id}`,
             playerId: player.id,
@@ -1302,14 +1462,28 @@ export default function App() {
             itemName: item.name,
             amount: item.price,
             quantity: 1,
-            timestamp
+            timestamp,
+            team: targetTeam
           });
+
           return {
             ...player,
-            drinksCount: { ...player.drinksCount, [itemId]: currentQty + 1 }
+            drinksCount: { ...player.drinksCount, [itemId]: currentQty + 1 },
+            teamStats: {
+              ...currentTeamStats,
+              [targetTeam]: {
+                ...currentHStats,
+                drinksCount: {
+                  ...currentHStats.drinksCount,
+                  [itemId]: currentHTeamQty + 1
+                }
+              }
+            }
           };
         } else {
           const currentQty = player.finesCount[itemId] || 0;
+          const currentHTeamQty = currentHStats.finesCount[itemId] || 0;
+
           newTransactions.push({
             id: `tx_bulk_f_${Date.now()}_${player.id}`,
             playerId: player.id,
@@ -1319,11 +1493,23 @@ export default function App() {
             itemName: item.name,
             amount: (item as Fine).amount,
             quantity: 1,
-            timestamp
+            timestamp,
+            team: targetTeam
           });
+
           return {
             ...player,
-            finesCount: { ...player.finesCount, [itemId]: currentQty + 1 }
+            finesCount: { ...player.finesCount, [itemId]: currentQty + 1 },
+            teamStats: {
+              ...currentTeamStats,
+              [targetTeam]: {
+                ...currentHStats,
+                finesCount: {
+                  ...currentHStats.finesCount,
+                  [itemId]: currentHTeamQty + 1
+                }
+              }
+            }
           };
         }
       }
@@ -1339,15 +1525,16 @@ export default function App() {
   };
 
   // Bulk booking
-  const handleBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string) => {
+  const handleBulkBook = (playerIds: string[], type: 'drink' | 'fine', itemId: string, team?: Team) => {
     const isAuthorizedForType = type === 'drink' ? (isAdminMode || isBookingAuthorized) : isAdminMode;
     if (isAuthorizedForType) {
-      executeBulkBook(playerIds, type, itemId);
+      executeBulkBook(playerIds, type, itemId, team);
     } else {
       setPendingAdminAction({ 
         type: type === 'drink' ? 'bulk_drink' : 'bulk_fine', 
         playerIds, 
-        itemId 
+        itemId,
+        team
       });
       setAdminPromptPin('');
       setAdminPromptError('');
@@ -1480,21 +1667,21 @@ export default function App() {
     if (authorized) {
       // Execute the pending action
       if (pendingAdminAction) {
-        const { type, playerId, fineId, playerIds, itemId } = pendingAdminAction;
+        const { type, playerId, fineId, playerIds, itemId, team } = pendingAdminAction;
         if (type === 'record_fine' && playerId && fineId) {
-          executeRecordFine(playerId, fineId);
+          executeRecordFine(playerId, fineId, team);
         } else if (type === 'remove_fine' && playerId && fineId) {
-          executeRemoveFine(playerId, fineId);
+          executeRemoveFine(playerId, fineId, team);
         } else if (type === 'bulk_fine' && playerIds && itemId) {
-          executeBulkBook(playerIds, 'fine', itemId);
+          executeBulkBook(playerIds, 'fine', itemId, team);
         } else if (type === 'bulk_drink' && playerIds && itemId) {
-          executeBulkBook(playerIds, 'drink', itemId);
+          executeBulkBook(playerIds, 'drink', itemId, team);
         } else if (type === 'record_drink' && playerId && itemId) {
-          executeRecordDrink(playerId, itemId);
+          executeRecordDrink(playerId, itemId, team);
         } else if (type === 'remove_drink' && playerId && itemId) {
-          executeRemoveDrink(playerId, itemId);
+          executeRemoveDrink(playerId, itemId, team);
         } else if (type === 'record_payment' && playerId && itemId) {
-          executeRecordPayment(playerId, parseFloat(itemId));
+          executeRecordPayment(playerId, parseFloat(itemId), team);
         } else if (type === 'revert_transaction' && itemId) {
           executeRevertTransaction(itemId);
         } else if (type === 'add_player') {
@@ -1541,8 +1728,13 @@ export default function App() {
     const tx = transactions.find(t => t.id === txId);
     if (!tx) return;
 
+    const txTeam: Team = tx.team === 'Herren 2' ? 'Herren 2' : 'Herren 1';
+
     const updatedPlayers = players.map(player => {
       if (player.id === tx.playerId) {
+        const teamStats = { ...(player.teamStats || {}) };
+        const hStats = teamStats[txTeam] ? { ...teamStats[txTeam]! } : { drinksCount: {}, finesCount: {}, totalPaid: 0 };
+
         if (tx.type === 'drink' && tx.itemId) {
           const currentQty = player.drinksCount[tx.itemId] || 0;
           const newDrinksCount = { ...player.drinksCount };
@@ -1551,7 +1743,18 @@ export default function App() {
           } else {
             delete newDrinksCount[tx.itemId];
           }
-          return { ...player, drinksCount: newDrinksCount };
+
+          const currentTeamQty = hStats.drinksCount[tx.itemId] || 0;
+          const newTeamDrinksCount = { ...hStats.drinksCount };
+          if (currentTeamQty > tx.quantity) {
+            newTeamDrinksCount[tx.itemId] = currentTeamQty - tx.quantity;
+          } else {
+            delete newTeamDrinksCount[tx.itemId];
+          }
+          hStats.drinksCount = newTeamDrinksCount;
+          teamStats[txTeam] = hStats;
+
+          return { ...player, drinksCount: newDrinksCount, teamStats };
         } else if (tx.type === 'fine' && tx.itemId) {
           const currentQty = player.finesCount[tx.itemId] || 0;
           const newFinesCount = { ...player.finesCount };
@@ -1560,9 +1763,23 @@ export default function App() {
           } else {
             delete newFinesCount[tx.itemId];
           }
-          return { ...player, finesCount: newFinesCount };
+
+          const currentTeamQty = hStats.finesCount[tx.itemId] || 0;
+          const newTeamFinesCount = { ...hStats.finesCount };
+          if (currentTeamQty > tx.quantity) {
+            newTeamFinesCount[tx.itemId] = currentTeamQty - tx.quantity;
+          } else {
+            delete newTeamFinesCount[tx.itemId];
+          }
+          hStats.finesCount = newTeamFinesCount;
+          teamStats[txTeam] = hStats;
+
+          return { ...player, finesCount: newFinesCount, teamStats };
         } else if (tx.type === 'payment') {
-          return { ...player, totalPaid: Math.max(0, player.totalPaid - tx.amount) };
+          const newTotalPaid = Math.max(0, player.totalPaid - tx.amount);
+          hStats.totalPaid = Math.max(0, (hStats.totalPaid || 0) - tx.amount);
+          teamStats[txTeam] = hStats;
+          return { ...player, totalPaid: newTotalPaid, teamStats };
         }
       }
       return player;
@@ -1570,6 +1787,10 @@ export default function App() {
 
     const updatedTx = transactions.filter(t => t.id !== txId);
     saveState(updatedPlayers, drinks, fines, updatedTx);
+
+    if (selectedPlayer && selectedPlayer.id === tx.playerId) {
+      setSelectedPlayer(updatedPlayers.find(p => p.id === tx.playerId) || null);
+    }
   };
 
   const handleRevertTransaction = (txId: string) => {
@@ -1690,64 +1911,47 @@ export default function App() {
   };
 
   // Calculate individual player balance
-  const getPlayerBalance = (player: Player) => {
-    const totalDrinksCost = Object.entries(player.drinksCount).reduce((acc, [drinkId, qty]) => {
-      const drink = drinks.find((d) => d.id === drinkId);
-      return acc + (drink ? drink.price * qty : 0);
-    }, 0);
-
-    const totalFinesCost = Object.entries(player.finesCount).reduce((acc, [fineId, qty]) => {
-      const fine = fines.find((f) => f.id === fineId);
-      return acc + (fine ? fine.amount * qty : 0);
-    }, 0);
-
-    return totalDrinksCost + totalFinesCost - player.totalPaid;
+  const getPlayerBalance = (player: Player, teamKey?: Team) => {
+    if (teamKey) {
+      return getPlayerTeamBalance(player, drinks, fines, teamKey).balance;
+    }
+    if (selectedTeam === 'Herren 1') {
+      return getPlayerTeamBalance(player, drinks, fines, 'Herren 1').balance;
+    }
+    if (selectedTeam === 'Herren 2') {
+      return getPlayerTeamBalance(player, drinks, fines, 'Herren 2').balance;
+    }
+    const h1 = getPlayerTeamBalance(player, drinks, fines, 'Herren 1').balance;
+    const h2 = getPlayerTeamBalance(player, drinks, fines, 'Herren 2').balance;
+    return Math.max(h1, h2);
   };
 
-  // --- STATS CALCULATION ---
+  // --- STATS & SEPARATE CASHBOX CALCULATION ---
+  const cashStatsH1 = calculateCashBoxStats('Herren 1', players, drinks, fines, expenses);
+  const cashStatsH2 = calculateCashBoxStats('Herren 2', players, drinks, fines, expenses);
+
+  const activeStats = selectedTeam === 'Herren 1'
+    ? cashStatsH1
+    : selectedTeam === 'Herren 2'
+    ? cashStatsH2
+    : {
+        totalPaid: cashStatsH1.totalPaid + cashStatsH2.totalPaid,
+        totalExpenses: cashStatsH1.totalExpenses + cashStatsH2.totalExpenses,
+        cashBalance: cashStatsH1.cashBalance + cashStatsH2.cashBalance,
+        totalDebt: cashStatsH1.totalDebt + cashStatsH2.totalDebt,
+        drinksCount: cashStatsH1.drinksCount + cashStatsH2.drinksCount,
+        finesCount: cashStatsH1.finesCount + cashStatsH2.finesCount,
+        revenue: cashStatsH1.revenue + cashStatsH2.revenue
+      };
+
   const calculateStats = (): ClubStats => {
-    let totalRevenue = 0;
-    let totalDrinksServed = 0;
-    let totalFinesCount = 0;
-
-    players.forEach(p => {
-      // Drink sum
-      Object.entries(p.drinksCount).forEach(([drinkId, qty]) => {
-        const drink = drinks.find(d => d.id === drinkId);
-        if (drink) {
-          const quantity = Number(qty);
-          totalRevenue += drink.price * quantity;
-          totalDrinksServed += quantity;
-        }
-      });
-
-      // Fines sum
-      Object.entries(p.finesCount).forEach(([fineId, qty]) => {
-        const fine = fines.find(f => f.id === fineId);
-        if (fine) {
-          const quantity = Number(qty);
-          totalRevenue += fine.amount * quantity;
-          totalFinesCount += quantity;
-        }
-      });
-    });
-
-    const totalPaid = players.reduce((sum, p) => sum + p.totalPaid, 0);
-    const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
-    
-    // Sum only positive balances to calculate outstanding debts (not offset by prepayments)
-    const totalOutstanding = players.reduce((sum, p) => {
-      const bal = getPlayerBalance(p);
-      return sum + (bal > 0 ? bal : 0);
-    }, 0);
-
     return {
-      totalRevenue,
-      totalPaid,
-      totalExpenses,
-      totalOutstanding,
-      drinksServed: totalDrinksServed,
-      finesIssuedCount: totalFinesCount,
+      totalRevenue: activeStats.revenue,
+      totalPaid: activeStats.totalPaid,
+      totalExpenses: activeStats.totalExpenses,
+      totalOutstanding: activeStats.totalDebt,
+      drinksServed: activeStats.drinksCount,
+      finesIssuedCount: activeStats.finesCount,
     };
   };
 
@@ -1806,17 +2010,30 @@ export default function App() {
         const finesCount: Record<string, number> = {};
         let totalPaid = 0;
 
+        const teamStats: {
+          'Herren 1': { drinksCount: Record<string, number>; finesCount: Record<string, number>; totalPaid: number };
+          'Herren 2': { drinksCount: Record<string, number>; finesCount: Record<string, number>; totalPaid: number };
+        } = {
+          'Herren 1': { drinksCount: {}, finesCount: {}, totalPaid: 0 },
+          'Herren 2': { drinksCount: {}, finesCount: {}, totalPaid: 0 }
+        };
+
         for (const t of playerTxs) {
           const qty = Number(t.quantity || 1);
           const amt = Number(t.amount || 0);
+          const tTeam: Team = t.team === 'Herren 2' ? 'Herren 2' : 'Herren 1';
+
           if (t.type === 'drink') {
             const itemId = t.itemId || 'd1';
             drinksCount[itemId] = (drinksCount[itemId] || 0) + qty;
+            teamStats[tTeam].drinksCount[itemId] = (teamStats[tTeam].drinksCount[itemId] || 0) + qty;
           } else if (t.type === 'fine') {
             const itemId = t.itemId || 'f1';
             finesCount[itemId] = (finesCount[itemId] || 0) + qty;
+            teamStats[tTeam].finesCount[itemId] = (teamStats[tTeam].finesCount[itemId] || 0) + qty;
           } else if (t.type === 'payment') {
             totalPaid += amt * qty;
+            teamStats[tTeam].totalPaid += amt * qty;
           }
         }
 
@@ -1824,7 +2041,19 @@ export default function App() {
           ...player,
           drinksCount,
           finesCount,
-          totalPaid: Number(totalPaid.toFixed(2))
+          totalPaid: Number(totalPaid.toFixed(2)),
+          teamStats: {
+            'Herren 1': {
+              drinksCount: teamStats['Herren 1'].drinksCount,
+              finesCount: teamStats['Herren 1'].finesCount,
+              totalPaid: Number(teamStats['Herren 1'].totalPaid.toFixed(2))
+            },
+            'Herren 2': {
+              drinksCount: teamStats['Herren 2'].drinksCount,
+              finesCount: teamStats['Herren 2'].finesCount,
+              totalPaid: Number(teamStats['Herren 2'].totalPaid.toFixed(2))
+            }
+          }
         };
         batch.set(doc(db, 'players', player.id), updated);
         return updated;
@@ -1832,7 +2061,7 @@ export default function App() {
 
       await batch.commit();
       setPlayers(updatedPlayers);
-      setBackupMessage({ text: '✅ Alle Kontostände wurden erfolgreich anhand der Transaktions-Historie abgeglichen!', isError: false });
+      setBackupMessage({ text: '✅ Alle Kontostände wurden erfolgreich für Herren 1 & Herren 2 anhand der Historie abgeglichen!', isError: false });
       setTimeout(() => setBackupMessage(null), 5000);
     } catch (err: any) {
       console.error("Failed to sync balances:", err);
@@ -2291,14 +2520,14 @@ export default function App() {
             <div className="flex justify-between items-start">
               <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1 group-hover:text-emerald-600 transition-colors">
                 <Coins className="w-3 h-3 text-emerald-600" />
-                Kassenbestand (Ist)
+                {selectedTeam === 'All' ? 'Getrennte Kassenstände' : `Kassenstand ${selectedTeam}`}
               </span>
               {isAdminMode && !isEditingCashBalance && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsEditingCashBalance(true);
-                    setEditCashBalanceValue(((stats.totalPaid - stats.totalExpenses) + manualCashAdjustment).toFixed(2));
+                    setEditCashBalanceValue(((activeStats.totalPaid - activeStats.totalExpenses) + manualCashAdjustment).toFixed(2));
                   }}
                   className="p-1 bg-slate-50 hover:bg-emerald-50 text-slate-400 hover:text-emerald-600 rounded-md transition border border-slate-100 cursor-pointer shrink-0"
                   title="Kassenstand manuell anpassen"
@@ -2308,7 +2537,7 @@ export default function App() {
               )}
               {!isAdminMode && (
                 <span className="text-[9px] font-extrabold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-md px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-all shrink-0">
-                  Verwalten ➔
+                  Ausgaben ➔
                 </span>
               )}
             </div>
@@ -2351,15 +2580,33 @@ export default function App() {
                   <X className="w-3 h-3" />
                 </button>
               </form>
+            ) : selectedTeam === 'All' ? (
+              <div className="mt-1 space-y-1">
+                <div className="flex justify-between items-center bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 text-xs font-mono">
+                  <span className="text-[#FF6B00] font-sans font-extrabold text-[11px]">🏀 H1 Kasse:</span>
+                  <span className={`font-bold ${cashStatsH1.cashBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {cashStatsH1.cashBalance.toFixed(2)} €
+                  </span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 text-xs font-mono">
+                  <span className="text-blue-600 font-sans font-extrabold text-[11px]">🏀 H2 Kasse:</span>
+                  <span className={`font-bold ${cashStatsH2.cashBalance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                    {cashStatsH2.cashBalance.toFixed(2)} €
+                  </span>
+                </div>
+                <span className="text-[10px] text-slate-400 block pt-0.5 font-mono">
+                  Gesamt: {(cashStatsH1.cashBalance + cashStatsH2.cashBalance + manualCashAdjustment).toFixed(2)} €
+                </span>
+              </div>
             ) : (
               <>
                 <p className="text-2xl font-black text-emerald-600 font-mono mt-1">
-                  {((stats.totalPaid - stats.totalExpenses) + manualCashAdjustment).toFixed(2)} €
+                  {(activeStats.cashBalance + (selectedTeam === 'Herren 1' ? manualCashAdjustment : 0)).toFixed(2)} €
                 </p>
                 <span className="text-[10px] text-slate-400 block mt-1">
-                  Eingezahlt: {stats.totalPaid.toFixed(2)} € • Ausgaben: {stats.totalExpenses.toFixed(2)} €
+                  Eingezahlt: {activeStats.totalPaid.toFixed(2)} € • Ausgaben: {activeStats.totalExpenses.toFixed(2)} €
                 </span>
-                {manualCashAdjustment !== 0 && (
+                {manualCashAdjustment !== 0 && selectedTeam === 'Herren 1' && (
                   <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-100 px-1 py-0.5 rounded-md mt-1 inline-block font-sans font-medium">
                     ⚠️ Manuell angepasst ({manualCashAdjustment > 0 ? '+' : ''}{manualCashAdjustment.toFixed(2)} €)
                   </span>
@@ -2374,10 +2621,28 @@ export default function App() {
               <AlertTriangle className="w-3 h-3 text-rose-600" />
               Offene Schulden
             </span>
-            <p className="text-2xl font-black text-rose-600 font-mono mt-1">
-              {stats.totalOutstanding.toFixed(2)} €
-            </p>
-            <span className="text-[10px] text-slate-400 block mt-1">Ausstehende Forderungen</span>
+            {selectedTeam === 'All' ? (
+              <div className="mt-1 space-y-1">
+                <div className="flex justify-between items-center bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 text-xs font-mono">
+                  <span className="text-[#FF6B00] font-sans font-extrabold text-[11px]">H1 offen:</span>
+                  <span className="font-bold text-rose-600">{cashStatsH1.totalDebt.toFixed(2)} €</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-50 px-2 py-1 rounded-lg border border-slate-100 text-xs font-mono">
+                  <span className="text-blue-600 font-sans font-extrabold text-[11px]">H2 offen:</span>
+                  <span className="font-bold text-rose-600">{cashStatsH2.totalDebt.toFixed(2)} €</span>
+                </div>
+                <span className="text-[10px] text-slate-400 block pt-0.5 font-mono">
+                  Gesamt offen: {(cashStatsH1.totalDebt + cashStatsH2.totalDebt).toFixed(2)} €
+                </span>
+              </div>
+            ) : (
+              <>
+                <p className="text-2xl font-black text-rose-600 font-mono mt-1">
+                  {activeStats.totalDebt.toFixed(2)} €
+                </p>
+                <span className="text-[10px] text-slate-400 block mt-1">Ausstehend bei Spielern ({selectedTeam})</span>
+              </>
+            )}
           </div>
 
           {/* Tile 3: Gesamtwert */}
@@ -2546,6 +2811,7 @@ export default function App() {
                     player={player}
                     drinks={drinks}
                     fines={fines}
+                    selectedTeam={selectedTeam}
                     onAddDrink={handleRecordDrink}
                     onAddFine={handleRecordFine}
                     onOpenDetails={setSelectedPlayer}
@@ -2614,6 +2880,7 @@ export default function App() {
             drinks={drinks}
             fines={fines}
             transactions={transactions}
+            initialTeam={selectedTeam !== 'All' ? selectedTeam : 'Herren 1'}
             onClose={() => setSelectedPlayer(null)}
             onAddDrink={handleRecordDrink}
             onRemoveDrink={handleRemoveDrink}
@@ -2752,7 +3019,9 @@ export default function App() {
         expenses={expenses}
         onAddExpense={handleAddExpense}
         onDeleteExpense={handleDeleteExpense}
-        totalPaid={stats.totalPaid}
+        h1Paid={cashStatsH1.totalPaid}
+        h2Paid={cashStatsH2.totalPaid}
+        defaultTeam={selectedTeam !== 'All' ? selectedTeam : 'Herren 1'}
         manualCashAdjustment={manualCashAdjustment}
         isAdminMode={isAdminMode}
         setIsAdminMode={setIsAdminMode}
@@ -2812,6 +3081,83 @@ export default function App() {
               >
                 <Trash2 className="w-3.5 h-3.5" />
                 Ja, alles nullen (Blanko)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Prompt for Multi-Team Booking (e.g. Florian booking drink/fine) */}
+      {teamChoicePrompt && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in" id="team-choice-modal">
+          <div className="bg-white border border-slate-200 rounded-3xl w-full max-w-sm p-6 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-full bg-orange-50 border border-orange-200 text-[#FF6B00] flex items-center justify-center font-bold text-xs">
+                  {teamChoicePrompt.type === 'drink' ? <Beer className="w-5 h-5 text-[#FF6B00]" /> : <AlertTriangle className="w-5 h-5 text-amber-500" />}
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900">Mannschaft auswählen</h3>
+                  <p className="text-[11px] text-slate-500">Für welches Team buchst du?</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setTeamChoicePrompt(null)}
+                className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 space-y-1">
+              <p className="text-xs text-slate-600">
+                Spieler: <span className="font-bold text-slate-900">{teamChoicePrompt.playerName}</span>
+              </p>
+              <p className="text-xs text-slate-600">
+                Posten: <span className="font-bold text-[#FF6B00]">{teamChoicePrompt.itemName}</span> ({teamChoicePrompt.itemPrice.toFixed(2)} €)
+              </p>
+              <p className="text-[11px] text-slate-500 pt-1">
+                Da <strong>{teamChoicePrompt.playerName}</strong> in beiden Mannschaften gemeldet ist, wähle bitte die zutreffende Kasse:
+              </p>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              {teamChoicePrompt.availableTeams.map((teamName) => (
+                <button
+                  key={teamName}
+                  type="button"
+                  onClick={() => {
+                    const prompt = teamChoicePrompt;
+                    setTeamChoicePrompt(null);
+                    if (prompt.type === 'drink') {
+                      handleRecordDrink(prompt.playerId, prompt.itemId, teamName);
+                    } else {
+                      handleRecordFine(prompt.playerId, prompt.itemId, teamName);
+                    }
+                  }}
+                  className={`w-full py-3 px-4 rounded-xl border text-sm font-bold transition flex items-center justify-between cursor-pointer ${
+                    teamName === 'Herren 1'
+                      ? 'bg-orange-50 hover:bg-[#FF6B00] text-[#FF6B00] hover:text-white border-orange-200 hover:border-[#FF6B00]'
+                      : 'bg-blue-50 hover:bg-blue-600 text-blue-600 hover:text-white border-blue-200 hover:border-blue-600'
+                  }`}
+                >
+                  <span className="flex items-center gap-1.5 font-bold">
+                    🏀 {teamName}
+                  </span>
+                  <span className="text-xs font-mono font-medium opacity-80">
+                    Kasse {teamName}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setTeamChoicePrompt(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Abbrechen
               </button>
             </div>
           </div>

@@ -713,10 +713,16 @@ export default function PlayerDetailModal({
                       <div className="text-right">
                         <span
                           className={`font-mono font-bold text-sm ${
-                            tx.type === 'payment' ? 'text-emerald-600' : 'text-rose-600'
+                            tx.type === 'payment'
+                              ? ((tx.amount * tx.quantity) >= 0 ? 'text-emerald-600' : 'text-rose-600')
+                              : 'text-rose-600'
                           }`}
                         >
-                          {tx.type === 'payment' ? '-' : '+'}{(tx.amount * tx.quantity).toFixed(2)} €
+                          {tx.type === 'payment'
+                            ? ((tx.amount * tx.quantity) >= 0
+                                ? `-${(tx.amount * tx.quantity).toFixed(2)} €`
+                                : `+${Math.abs(tx.amount * tx.quantity).toFixed(2)} €`)
+                            : `+${(tx.amount * tx.quantity).toFixed(2)} €`}
                         </span>
                       </div>
                     </div>

@@ -141,7 +141,7 @@ export default function TransactionHistory({ transactions, onRevertTransaction, 
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="shrink-0">
-                    {isPayment ? (
+                    {isPayment && totalVal >= 0 ? (
                       <ArrowDownCircle className="w-6 h-6 text-emerald-500" />
                     ) : (
                       <ArrowUpCircle className="w-6 h-6 text-[#FF6B00]" />
@@ -183,10 +183,14 @@ export default function TransactionHistory({ transactions, onRevertTransaction, 
                   <div className="text-right">
                     <span
                       className={`font-mono font-bold text-xs ${
-                        isPayment ? 'text-emerald-600' : 'text-rose-600'
+                        isPayment
+                          ? (totalVal >= 0 ? 'text-emerald-600' : 'text-rose-600')
+                          : 'text-rose-600'
                       }`}
                     >
-                      {isPayment ? '-' : '+'}{totalVal.toFixed(2)} €
+                      {isPayment
+                        ? (totalVal >= 0 ? `-${totalVal.toFixed(2)} €` : `+${Math.abs(totalVal).toFixed(2)} €`)
+                        : `+${totalVal.toFixed(2)} €`}
                     </span>
                   </div>
 

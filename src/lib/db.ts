@@ -4,27 +4,45 @@ import {
   setDoc, 
   deleteDoc, 
   writeBatch, 
-  getDocs,
+  getDocsFromServer,
   query,
   limit
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { Player, Drink, Fine, Transaction, Expense } from '../types';
 
-// Helper to check if database is empty
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map(stripUndefined) as unknown as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    const clean: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v !== undefined) {
+        clean[k] = stripUndefined(v);
+      }
+    }
+    return clean as T;
+  }
+  return value;
+}
+
+// Helper to check if database is genuinely empty on the Firestore server
 export async function isDatabaseEmpty(): Promise<boolean> {
-  const path = 'players';
   try {
-    const q = query(collection(db, path), limit(1));
-    const snapshot = await getDocs(q);
-    return snapshot.empty;
+    const [playersSnap, txSnap, drinksSnap] = await Promise.all([
+      getDocsFromServer(query(collection(db, 'players'), limit(1))),
+      getDocsFromServer(query(collection(db, 'transactions'), limit(1))),
+      getDocsFromServer(query(collection(db, 'drinks'), limit(1)))
+    ]);
+    return playersSnap.empty && txSnap.empty && drinksSnap.empty;
   } catch (error) {
     console.error("Error checking isDatabaseEmpty:", error);
     return false; // Safely return false so existing databases are never accidentally overwritten
   }
 }
 
-// Seed the database with initial demo data
+// Seed the database with initial demo data (only if genuinely empty on server)
 export async function seedDatabase(
   players: Player[], 
   drinks: Drink[], 
@@ -33,36 +51,42 @@ export async function seedDatabase(
   expenses: Expense[]
 ) {
   try {
+    const empty = await isDatabaseEmpty();
+    if (!empty) {
+      console.warn("seedDatabase aborted: database is not empty.");
+      return;
+    }
+
     const batch = writeBatch(db);
 
     // Seed drinks
     drinks.forEach(drink => {
       const dRef = doc(db, 'drinks', drink.id);
-      batch.set(dRef, drink);
+      batch.set(dRef, stripUndefined(drink));
     });
 
     // Seed fines
     fines.forEach(fine => {
       const fRef = doc(db, 'fines', fine.id);
-      batch.set(fRef, fine);
+      batch.set(fRef, stripUndefined(fine));
     });
 
     // Seed players
     players.forEach(player => {
       const pRef = doc(db, 'players', player.id);
-      batch.set(pRef, player);
+      batch.set(pRef, stripUndefined(player));
     });
 
     // Seed transactions
     transactions.forEach(tx => {
       const tRef = doc(db, 'transactions', tx.id);
-      batch.set(tRef, tx);
+      batch.set(tRef, stripUndefined(tx));
     });
 
     // Seed expenses
     expenses.forEach(expense => {
       const eRef = doc(db, 'expenses', expense.id);
-      batch.set(eRef, expense);
+      batch.set(eRef, stripUndefined(expense));
     });
 
     await batch.commit();
@@ -75,7 +99,7 @@ export async function seedDatabase(
 export async function dbSavePlayer(player: Player): Promise<void> {
   const path = `players/${player.id}`;
   try {
-    await setDoc(doc(db, 'players', player.id), player);
+    await setDoc(doc(db, 'players', player.id), stripUndefined(player));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -94,7 +118,7 @@ export async function dbDeletePlayer(playerId: string): Promise<void> {
 export async function dbSaveDrink(drink: Drink): Promise<void> {
   const path = `drinks/${drink.id}`;
   try {
-    await setDoc(doc(db, 'drinks', drink.id), drink);
+    await setDoc(doc(db, 'drinks', drink.id), stripUndefined(drink));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -113,7 +137,7 @@ export async function dbDeleteDrink(drinkId: string): Promise<void> {
 export async function dbSaveFine(fine: Fine): Promise<void> {
   const path = `fines/${fine.id}`;
   try {
-    await setDoc(doc(db, 'fines', fine.id), fine);
+    await setDoc(doc(db, 'fines', fine.id), stripUndefined(fine));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -132,7 +156,7 @@ export async function dbDeleteFine(fineId: string): Promise<void> {
 export async function dbSaveTransaction(tx: Transaction): Promise<void> {
   const path = `transactions/${tx.id}`;
   try {
-    await setDoc(doc(db, 'transactions', tx.id), tx);
+    await setDoc(doc(db, 'transactions', tx.id), stripUndefined(tx));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -151,7 +175,7 @@ export async function dbDeleteTransaction(txId: string): Promise<void> {
 export async function dbSaveExpense(expense: Expense): Promise<void> {
   const path = `expenses/${expense.id}`;
   try {
-    await setDoc(doc(db, 'expenses', expense.id), expense);
+    await setDoc(doc(db, 'expenses', expense.id), stripUndefined(expense));
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
@@ -176,12 +200,12 @@ export async function dbBulkBook(
 
     txs.forEach(tx => {
       const txRef = doc(db, 'transactions', tx.id);
-      batch.set(txRef, tx);
+      batch.set(txRef, stripUndefined(tx));
     });
 
     updatedPlayers.forEach(player => {
       const pRef = doc(db, 'players', player.id);
-      batch.set(pRef, player);
+      batch.set(pRef, stripUndefined(player));
     });
 
     await batch.commit();
@@ -202,7 +226,7 @@ export async function dbRevertTransaction(
     batch.delete(txRef);
 
     const pRef = doc(db, 'players', updatedPlayer.id);
-    batch.set(pRef, updatedPlayer);
+    batch.set(pRef, stripUndefined(updatedPlayer));
 
     await batch.commit();
   } catch (error) {
@@ -225,23 +249,23 @@ export async function dbImportAllData(
     // Note: Due to Firestore limits on batch size (500), we can write the new documents directly.
     // If there's an existing document with the same ID, set() with overwrite will replace it.
     drinks.forEach(drink => {
-      batch.set(doc(db, 'drinks', drink.id), drink);
+      batch.set(doc(db, 'drinks', drink.id), stripUndefined(drink));
     });
 
     fines.forEach(fine => {
-      batch.set(doc(db, 'fines', fine.id), fine);
+      batch.set(doc(db, 'fines', fine.id), stripUndefined(fine));
     });
 
     players.forEach(player => {
-      batch.set(doc(db, 'players', player.id), player);
+      batch.set(doc(db, 'players', player.id), stripUndefined(player));
     });
 
     transactions.forEach(tx => {
-      batch.set(doc(db, 'transactions', tx.id), tx);
+      batch.set(doc(db, 'transactions', tx.id), stripUndefined(tx));
     });
 
     expenses.forEach(expense => {
-      batch.set(doc(db, 'expenses', expense.id), expense);
+      batch.set(doc(db, 'expenses', expense.id), stripUndefined(expense));
     });
 
     await batch.commit();

@@ -1873,16 +1873,21 @@ export default function App() {
         batch.delete(doc.ref);
       });
 
-      // 3. Reset all players to empty drinksCount, finesCount, and totalPaid
+      // 3. Reset all players to empty drinksCount, finesCount, totalPaid, and teamStats
+      const emptyTeamStats = {
+        'Herren 1': { drinksCount: {}, finesCount: {}, totalPaid: 0 },
+        'Herren 2': { drinksCount: {}, finesCount: {}, totalPaid: 0 }
+      };
       const playerSnap = await getDocs(collection(db, 'players'));
       playerSnap.forEach((doc) => {
         const pData = doc.data() as Player;
-        batch.set(doc.ref, {
+        batch.set(doc.ref, cleanForFirestore({
           ...pData,
           drinksCount: {},
           finesCount: {},
-          totalPaid: 0
-        });
+          totalPaid: 0,
+          teamStats: emptyTeamStats
+        }));
       });
 
       // 4. Reset settings manualCashAdjustment to 0
@@ -1897,7 +1902,8 @@ export default function App() {
         ...p,
         drinksCount: {},
         finesCount: {},
-        totalPaid: 0
+        totalPaid: 0,
+        teamStats: emptyTeamStats
       })));
       setManualCashAdjustment(0);
       setIsResetDbModalOpen(false);
@@ -2055,7 +2061,7 @@ export default function App() {
             }
           }
         };
-        batch.set(doc(db, 'players', player.id), updated);
+        batch.set(doc(db, 'players', player.id), cleanForFirestore(updated));
         return updated;
       });
 
